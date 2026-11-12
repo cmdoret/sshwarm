@@ -6,11 +6,13 @@
 
 <p align="center"><b><a href="https://k9scli.io">k9s</a> for ssh.</b> Your NixOS machines, their services, containers and logs, in one terminal.</p>
 
+<p align="center"><img src="assets/sshwarm.gif" alt="" width="720"></p>
+
 Tired of ssh-ing into box after box to find out what's deployed where, which service died
 overnight and which container is crash-looping? **sshwarm** shows the whole swarm at a
 glance, with the logs of whatever is red a keypress away.
 
-- **Every machine, one table:** deployed commit, uptime, pending reboot, failed units, unhealthy compose stacks.
+- **Every machine, one table:** uptime, pending reboot, systemd units, compose stacks.
 - **Agentless and read-only:** a small bash probe over your own `ssh`, with your keys, agent and `~/.ssh/config`. Nothing to install on the machines.
 - **Scriptable:** `sshwarm status` prints the table and exits 1 when anything is wrong.
 
