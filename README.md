@@ -23,7 +23,12 @@ go install github.com/cmdoret/sshwarm@latest
 
 ## Requirements
 
-
+- `ssh`, `nix`, and a flake listing the machines in `deploy.nodes`, as for
+  [deploy-rs](https://github.com/serokell/deploy-rs): `hostname` and `sshUser`.
+- NixOS machines reachable over ssh without a password prompt (keys or agent) with:
+    - ssh user in the `systemd-journal` group.
+    - passwordless `sudo docker`.
+    - optional: `system.configurationRevision` set in the machines' configuration.
 
 ## Use
 
@@ -32,9 +37,6 @@ sshwarm --flake ./nix              # browse: machines, then services and stacks,
 sshwarm --flake ./nix status web   # the table, for the machines whose name contains "web"
 ```
 
-Machines come from your flake's `deploy.nodes` ([deploy-rs](https://github.com/serokell/deploy-rs)); set
-`SSHWARM_FLAKE` to skip `--flake`. The ssh user needs the `systemd-journal` group for logs and
-passwordless `sudo docker` for stacks, and the REV column needs
-`system.configurationRevision = self.rev or self.dirtyRev or null;`. The rest: `sshwarm help`.
+Set `SSHWARM_FLAKE` to skip `--flake`. The rest: `sshwarm help`.
 
 <sub>GPL-3.0</sub>
