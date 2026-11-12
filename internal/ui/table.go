@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
 var (
@@ -76,10 +78,16 @@ func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
 	case "/":
 		return t.filter.Focus()
 	case "l":
-		return t.logs(m)
+		return t.show(m, t.kind.logs, true)
+	case "d":
+		return t.show(m, t.kind.describe, false)
+	case "s":
+		if key, ok := t.selected(); ok && t.kind.shell != nil {
+			return t.kind.shell(m, t.host, key)
+		}
 	case "enter":
 		if t.kind.enter == nil {
-			return t.logs(m)
+			return t.show(m, t.kind.logs, true)
 		}
 
 		if key, ok := t.selected(); ok {
@@ -120,17 +128,19 @@ func (t *table) selected() (string, bool) {
 	return t.grid.rows[t.grid.cursor].key, true
 }
 
-// logs opens the logs of the row under the cursor, if its kind has any.
-func (t *table) logs(m *model) tea.Cmd {
+// show runs the command that command gives for the row under the cursor, and shows
+// its output over the table: logs, which can be followed, or a description. A nil
+// command means the kind has none.
+func (t *table) show(m *model, command func(swarm.Report, string) (string, string), canFollow bool) tea.Cmd {
 	key, ok := t.selected()
-	if !ok || t.kind.logs == nil {
+	if !ok || command == nil {
 		return nil
 	}
 
 	r := m.reports[t.host]
-	title, cmd := t.kind.logs(r, key)
+	title, cmd := command(r, key)
 
-	return m.push(newText(r.Host.Name+" · "+title, r.Host, cmd))
+	return m.push(newText(r.Host.Name+" · "+title, r.Host, cmd, canFollow))
 }
 
 // nextTab shows the machine's next kind, or with step -1 the previous one, if it

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
@@ -35,9 +36,13 @@ type screen interface {
 }
 
 type (
-	reportsMsg []swarm.Report
-	tickMsg    int // refresh generation, so a manual refresh doesn't double the timer
+	reportsMsg   []swarm.Report
+	tickMsg      int                 // refresh generation, so a manual refresh doesn't double the timer
+	shellDoneMsg struct{ err error } // a shell ended, with the error of ssh, or of what it ran
 )
+
+// execProcess hands the terminal to a command until it ends. Tests replace it.
+var execProcess = tea.ExecProcess
 
 type model struct {
 	ctx               context.Context // cancelled when sshwarm exits: ends every ssh it started
@@ -145,6 +150,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t, ok := m.top().(*text); ok && msg.ch == t.ch {
 			cmd = t.add(msg)
 		}
+	case shellDoneMsg:
+		// The alt screen is back over what the shell printed: say how it ended.
+		if msg.err != nil {
+			m.flash = "shell ended: " + msg.err.Error()
+		}
+
+		cmd = m.refresh() // what was done there shows now
 	case tea.KeyMsg:
 		return m.key(msg)
 	}
@@ -258,6 +270,12 @@ func (m *model) goTo(command string) tea.Cmd {
 	return m.push(newTable(k, host, ""))
 }
 
+// shell hands the terminal to ssh on h, running remote, or with remote "", a login
+// shell. The TUI is back when it ends.
+func (m *model) shell(h swarm.Host, remote string) tea.Cmd {
+	return execProcess(swarm.Interactive(m.ctx, h, remote), func(err error) tea.Msg { return shellDoneMsg{err} })
+}
+
 // machine is the index of the machine named, or else of the one on screen.
 func (m model) machine(name string) (int, error) {
 	if name != "" {
@@ -282,14 +300,15 @@ func (m model) View() string {
 }
 
 // frame lays out a screen: a title line, the body, and a help line, unless the
-// command bar or a message takes its place.
+// command bar or a message takes its place. Title and help are cut to the window's
+// width: wrapped, they would push the screen past the window's bottom.
 func (m *model) frame(title, body, help string) string {
 	bar := m.bar()
 	if bar == "" {
 		bar = dimStyle.Render(help)
 	}
 
-	return title + "\n" + body + "\n" + bar
+	return ansi.Truncate(title, m.width, "…") + "\n" + body + "\n" + ansi.Truncate(bar, m.width, "…")
 }
 
 // bar is the command bar while it's open, or the message if there is one.

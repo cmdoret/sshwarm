@@ -13,8 +13,8 @@ import (
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
-// kind is a resource the tables list: its names, columns and rows, and what enter
-// and l do on a row, found by its key.
+// kind is a resource the tables list: its names, columns and rows, and what enter,
+// l, d and s do on a row, found by its key.
 type kind struct {
 	names  []string // the first is the tab's name; all of them work in the command bar
 	help   string   // its own keys, for the help line
@@ -22,6 +22,9 @@ type kind struct {
 	rows   func(m *model, host int, stack string) []row
 	enter  func(m *model, host int, key string) tea.Cmd         // the next level; nil: the logs
 	logs   func(r swarm.Report, key string) (title, cmd string) // nil: no logs
+
+	describe func(r swarm.Report, key string) (title, cmd string) // nil: nothing to describe
+	shell    func(m *model, host int, key string) tea.Cmd         // nil: no shell
 }
 
 // kinds are the command bar's resources.
@@ -51,7 +54,7 @@ func tabsOf(r swarm.Report) []*kind {
 // machines is the bottom table; a machine's own kinds are its tabs (tabsOf).
 var machines = &kind{
 	names:  []string{"machines"},
-	help:   "enter open",
+	help:   "enter open · s ssh",
 	titles: machineTitles,
 	rows: func(m *model, _ int, _ string) []row {
 		var rows []row
@@ -62,10 +65,16 @@ var machines = &kind{
 		return rows
 	},
 	enter: func(m *model, _ int, name string) tea.Cmd {
-		i := slices.IndexFunc(m.reports, func(r swarm.Report) bool { return r.Host.Name == name })
-
-		return m.push(newTable(services, i, ""))
+		return m.push(newTable(services, machineNamed(m, name), ""))
 	},
+	shell: func(m *model, _ int, name string) tea.Cmd {
+		return m.shell(m.reports[machineNamed(m, name)].Host, "")
+	},
+}
+
+// machineNamed is the index of the machine with that name in m.reports.
+func machineNamed(m *model, name string) int {
+	return slices.IndexFunc(m.reports, func(r swarm.Report) bool { return r.Host.Name == name })
 }
 
 // machineTitles head the machines table: `sshwarm status` prints all but PROBLEMS.
@@ -134,10 +143,13 @@ func machineRow(r swarm.Report) row {
 
 var services = &kind{
 	names:  []string{"services", "svc"},
-	help:   "enter logs",
+	help:   "enter logs · d describe",
 	titles: []string{"UNIT", "ACTIVE", "SUB", "RESULT", "AGE", "DESCRIPTION"},
 	rows:   serviceRows,
 	logs:   func(_ swarm.Report, unit string) (string, string) { return unit, swarm.UnitLogs(unit) },
+	describe: func(_ swarm.Report, unit string) (string, string) {
+		return "describe " + unit, swarm.DescribeUnit(unit)
+	},
 }
 
 // serviceRows lists a machine's failed and enabled units, failed first; with m.all,
@@ -202,7 +214,7 @@ func unitRow(r swarm.Report, u swarm.Unit) row {
 
 var stacks = &kind{
 	names:  []string{"stacks", "compose"},
-	help:   "enter containers · l logs",
+	help:   "enter containers · l logs · d describe",
 	titles: []string{"STACK", "OK", "PROBLEMS"},
 	rows: func(m *model, host int, _ string) []row {
 		var rows []row
@@ -216,12 +228,15 @@ var stacks = &kind{
 	logs: func(r swarm.Report, stack string) (string, string) {
 		return "stack " + stack, swarm.StackLogs(r.Docker, stack)
 	},
+	describe: func(r swarm.Report, stack string) (string, string) {
+		return "describe stack " + stack, swarm.DescribeStack(r.Docker, stack)
+	},
 }
 
 // containers lists a machine's compose containers, or one stack's.
 var containers = &kind{
 	names:  []string{"containers", "ctr"},
-	help:   "enter logs",
+	help:   "enter logs · d describe · s shell",
 	titles: []string{"CONTAINER", "STACK", "STATE", "STATUS"},
 	rows: func(m *model, host int, stack string) []row {
 		var rows []row
@@ -240,6 +255,14 @@ var containers = &kind{
 	},
 	logs: func(r swarm.Report, name string) (string, string) {
 		return "container " + name, swarm.ContainerLogs(r.Docker, name)
+	},
+	describe: func(r swarm.Report, name string) (string, string) {
+		return "describe container " + name, swarm.DescribeContainer(r.Docker, name)
+	},
+	shell: func(m *model, host int, name string) tea.Cmd {
+		r := m.reports[host]
+
+		return m.shell(r.Host, swarm.ContainerShell(r.Docker, name))
 	},
 }
 

@@ -1,19 +1,24 @@
 package ui
 
 import (
+	"errors"
+	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
 // session drives the TUI like a user: it types keys and checks the screens.
 type session struct {
-	t *testing.T
-	m tea.Model
+	t     *testing.T
+	m     tea.Model
+	width int
 }
 
 // start opens the TUI on reports, in a 160×30 window.
@@ -26,10 +31,16 @@ func start(t *testing.T, reports ...swarm.Report) *session {
 	}
 
 	s := &session{t: t, m: newModel(t.Context(), hosts, time.Second, time.Hour)}
-	s.m, _ = s.m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+	s.resize(160)
 	s.m, _ = s.m.Update(reportsMsg(reports))
 
 	return s
+}
+
+// resize makes the window width columns wide, and 30 lines high.
+func (s *session) resize(width int) {
+	s.width = width
+	s.m, _ = s.m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
 }
 
 // keys types each key: "enter", "esc", "tab", "shift+tab", or else text.
@@ -68,6 +79,12 @@ func (s *session) expect(want ...string) {
 
 	if n := strings.Count(v, "\n") + 1; n > 30 {
 		s.t.Errorf("view is %d lines, taller than the window:\n%s", n, v)
+	}
+
+	for line := range strings.Lines(v) {
+		if w := lipgloss.Width(strings.TrimSuffix(line, "\n")); w > s.width {
+			s.t.Errorf("a line is %d columns, wider than the window: %q", w, line)
+		}
 	}
 }
 
@@ -241,4 +258,73 @@ func TestNavigation(t *testing.T) {
 	// :machines goes back to the bottom.
 	s.keys(":", "machines", "enter")
 	s.expect("1 machines", "enter open")
+}
+
+// d describes a unit, a stack or a container, and s opens a shell on a machine or
+// in a container.
+func TestActions(t *testing.T) {
+	r := fixture(t)
+	fakeBin(t, "ssh", `eval remote=\${$#}; echo "ran: $remote"`)
+
+	var shell []string
+
+	saved := execProcess
+	t.Cleanup(func() { execProcess = saved })
+	execProcess = func(c *exec.Cmd, done tea.ExecCallback) tea.Cmd {
+		shell = c.Args
+
+		return func() tea.Msg { return done(errors.New("exit status 127")) }
+	}
+
+	s := start(t, r)
+
+	// s on a machine: ssh with a terminal, and no command, so a login shell.
+	s.keys("s")
+
+	if n := len(shell); n < 2 || shell[n-2] != "--" || shell[n-1] != "argiope" || !slices.Contains(shell, "-tt") {
+		t.Errorf("machine shell: %q", shell)
+	}
+
+	// d on the failed unit: its status, nothing to follow.
+	s.keys("enter")
+	s.logs("d")
+	s.expect("app-node-argiope · describe broken.service", "ran: timeout 30 systemctl status --no-pager 'broken.service' || true")
+
+	if strings.Contains(s.m.View(), "s follow") {
+		t.Error("a description offers to follow")
+	}
+
+	s.keys("s")
+
+	if s.top().(*text).follow {
+		t.Error("s followed a description")
+	}
+
+	// A stack, then a container: their commands run in one shell, under one timeout.
+	s.keys("esc", "tab")
+	s.logs("d")
+	s.expect("describe stack cook", `ran: timeout 30 sh -c 'sudo -n docker compose -p '\''cook'\'' ps -a; echo; sudo -n docker compose -p '\''cook'\'' stats --no-stream'`)
+
+	s.keys("esc", "enter")
+	s.logs("d")
+	s.expect("describe container cook-cookcli-1", `sudo -n docker inspect '\''cook-cookcli-1'\'''`)
+
+	// s in a container: docker exec, then the TUI says how the shell ended.
+	s.keys("esc")
+
+	var cmd tea.Cmd
+	s.m, cmd = s.m.Update(keyMsg("s"))
+
+	want := "sudo -n docker exec -it 'cook-cookcli-1' sh -c 'command -v bash >/dev/null && exec bash || exec sh'"
+	if shell[len(shell)-1] != want {
+		t.Errorf("container shell: %q", shell)
+	}
+
+	s.m, _ = s.m.Update(cmd())
+	s.expect("shell ended: exit status 127")
+
+	// In a narrow window, the title and help lines are cut instead of wrapped.
+	s.resize(60)
+	s.keys("j") // clears the message
+	s.expect("enter logs · d describe · s shell", "…")
 }
