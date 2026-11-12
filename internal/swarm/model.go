@@ -51,6 +51,10 @@ type Stack struct {
 	Containers []Container
 }
 
+// Interesting says whether u is worth watching: failed, or enabled to run. The rest
+// are static or inactive units: hundreds of them, rarely of interest.
+func (u Unit) Interesting() bool { return u.Active == "failed" || u.UnitFileState == "enabled" }
+
 // Failed returns the units in the failed state.
 func (r Report) Failed() []Unit {
 	var out []Unit

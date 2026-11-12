@@ -7,7 +7,7 @@ import (
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
-// The table shows ages and commits short, and lists the problems below it.
+// The table shows ages short, counts units as stacks, and lists the problems below it.
 func TestPrintStatus(t *testing.T) {
 	r := fixture(t)
 	var b strings.Builder
@@ -22,9 +22,9 @@ func TestPrintStatus(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]string{
-		"MACHINE":            "MACHINE STATE REV DEPLOYED UPTIME REBOOT FAILED STACKS",
-		"app-node-argiope":   "app-node-argiope degraded 0123456-dirty 2h 25h yes 1 1/3",
-		"garage-node-neatus": "garage-node-neatus down - - - - - -",
+		"MACHINE":            "MACHINE STATE DEPLOY UP REBOOT UNITS STACKS",
+		"app-node-argiope":   "app-node-argiope degraded 2h 25h yes 2/3 1/3",
+		"garage-node-neatus": "garage-node-neatus down - - - - -",
 	} {
 		if rows[name] != want {
 			t.Errorf("row %q:\n got %q\nwant %q", name, rows[name], want)

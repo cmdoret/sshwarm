@@ -7,14 +7,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/cmdoret/sshwarm/internal/swarm"
-)
-
-var (
-	tabStyle   = lipgloss.NewStyle().Padding(0, 1)
-	onTabStyle = tabStyle.Reverse(true)
 )
 
 // table is a screen listing the rows of one kind: the machines, or a machine's
@@ -58,7 +52,7 @@ func (t *table) resize(width, height int) {
 		lines++ // the tabs
 	}
 
-	t.grid.width, t.grid.height = width, max(height-lines, 3)
+	t.grid.width, t.grid.height = width-sides, max(height-lines, 3)
 	t.grid.clamp()
 }
 
@@ -148,7 +142,7 @@ func (t *table) show(m *model, command func(swarm.Report, string) (string, strin
 	r := m.reports[host]
 	title, cmd := command(r, key)
 
-	return m.push(newText(r.Host.Name+" · "+title, r.Host, cmd, canFollow))
+	return m.push(newText(title, r.Host, cmd, canFollow))
 }
 
 // nextTab shows the machine's next kind, or with step -1 the previous one, if it
@@ -172,37 +166,42 @@ func (t *table) nextTab(m *model, step int) {
 func (t *table) view(m *model) string {
 	filter := ""
 	if t.filter.Focused() || t.filter.Value() != "" {
-		filter = "  " + t.filter.View()
+		filter = " " + t.filter.View()
 	}
 
 	if t.kind == machines {
-		title := titleStyle.Render("sshwarm") + dimStyle.Render(fmt.Sprintf(" · %d machines · %s", len(m.reports), m.refreshStatus()))
+		title := crumbs(fmt.Sprintf("machines %d", len(m.reports))) + filter
 
-		return m.frame(title+filter, t.grid.view(), t.kind.help+" · / filter · : go to · r refresh · q quit")
+		return m.frame(title, m.refreshStatus(), t.grid.view(), t.kind.help+" · / filter · : go to · r refresh · q quit")
 	}
 
 	r := m.reports[t.host]
 
-	name := r.Host.Name
+	where := []string{r.Host.Name}
 	if t.stack != "" {
-		name += " · stack " + t.stack
+		where = append(where, "stack "+t.stack)
 	}
 
-	title := titleStyle.Render(name) + dimStyle.Render(fmt.Sprintf(" · %s · up %s · %s", r.OS, short(r.Uptime), m.refreshStatus()))
+	title := crumbs(where...) + dimStyle.Render(" · "+r.OS) + revision(r.Revision) + dimStyle.Render(" · up "+short(r.Uptime))
 
 	if r.Err != nil {
-		return m.frame(title, toneStyles[bad].Render("down: "+r.Err.Error()), "r refresh · esc back · q quit")
+		return m.frame(title, m.refreshStatus(), toneStyles[bad].Render("down: "+r.Err.Error()), "r refresh · esc back · q quit")
 	}
 
 	var tabs string
 
 	for _, k := range tabsOf(r) {
-		n, style := len(t.grid.rows), onTabStyle // the current tab: its rows, as shown
+		n := len(t.grid.rows) // the current tab: its rows, as shown
 		if k != t.kind {
-			n, style = len(matching(k.rows(m, t.host, ""), t.filter.Value())), tabStyle
+			n = len(matching(k.rows(m, t.host, ""), t.filter.Value()))
 		}
 
-		tabs += style.Render(fmt.Sprintf("%s %d", k.names[0], n))
+		tab := fmt.Sprintf("%s %d", k.names[0], n)
+		if k == t.kind {
+			tabs += pill(tab) + " "
+		} else {
+			tabs += dimStyle.Render(" "+tab+" ") + " "
+		}
 	}
 
 	help := t.kind.help
@@ -215,5 +214,20 @@ func (t *table) view(m *model) string {
 		help += " · a " + scope + " units"
 	}
 
-	return m.frame(title, tabs+filter+"\n"+t.grid.view(), help+" · tab switch · / filter · : go to · esc back · q quit")
+	return m.frame(title, m.refreshStatus(), tabs+filter+"\n"+t.grid.view(), help+" · tab switch · / filter · : go to · esc back · q quit")
+}
+
+// revision is " · rev <commit>" for the title, warning when the tree was dirty; ""
+// without a revision (not NixOS, or the flake doesn't set it).
+func revision(rev string) string {
+	if rev == "" {
+		return ""
+	}
+
+	style := dimStyle
+	if strings.HasSuffix(rev, "-dirty") {
+		style = toneStyles[warn]
+	}
+
+	return dimStyle.Render(" · rev ") + style.Render(shortRev(rev))
 }

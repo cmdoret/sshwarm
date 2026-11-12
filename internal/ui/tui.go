@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -18,13 +19,26 @@ import (
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
+// accent marks what sshwarm draws itself, the title, tabs, cursor and keys, apart
+// from the tones of what the machines report. A terminal palette color, like those,
+// so it follows the user's theme.
+var accent = lipgloss.Color("5") // magenta
+
 var (
 	titleStyle = lipgloss.NewStyle().Bold(true)
 	dimStyle   = lipgloss.NewStyle().Faint(true)
+	keyStyle   = lipgloss.NewStyle().Bold(true).Foreground(accent)
+	pillStyle  = keyStyle.Reverse(true)
 )
 
-// chrome is the lines frame draws around a screen's body: its title and help lines.
-const chrome = 2
+const (
+	// chrome is the lines frame draws around a screen's body: the box's top and bottom
+	// edges, and the help line.
+	chrome = 3
+
+	// sides is the columns frame draws around a screen's body: the box's edges.
+	sides = 2
+)
 
 // screen is one level of the TUI: a table, or a command's output. Enter opens a
 // screen over the current one, esc goes back.
@@ -53,6 +67,7 @@ type model struct {
 	refreshing bool
 	refreshed  time.Time
 	tickGen    int
+	spin       spinner.Model // turns while refreshing
 
 	all           bool // services: show every unit, not only the interesting ones
 	width, height int
@@ -67,12 +82,13 @@ func newModel(ctx context.Context, hosts []swarm.Host, timeout, interval time.Du
 
 	return model{
 		ctx: ctx, hosts: hosts, timeout: timeout, interval: interval, refreshing: true,
+		spin:    spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(keyStyle)),
 		screens: []screen{newTable(machines, -1, "")}, command: c,
 	}
 }
 
 // Init probes the machines a first time.
-func (m model) Init() tea.Cmd { return m.probe() }
+func (m model) Init() tea.Cmd { return tea.Batch(m.probe(), m.spin.Tick) }
 
 // refresh probes the machines again, unless a probe is still running.
 func (m *model) refresh() tea.Cmd {
@@ -82,7 +98,7 @@ func (m *model) refresh() tea.Cmd {
 
 	m.refreshing = true
 
-	return m.probe()
+	return tea.Batch(m.probe(), m.spin.Tick)
 }
 
 func (m model) probe() tea.Cmd {
@@ -145,6 +161,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		if int(msg) == m.tickGen {
 			cmd = m.refresh()
+		}
+	case spinner.TickMsg:
+		if m.refreshing { // else no next tick: the spinner stops until the next refresh
+			m.spin, cmd = m.spin.Update(msg)
 		}
 	case logLinesMsg:
 		if t, ok := m.top().(*text); ok && msg.ch == t.ch {
@@ -294,7 +314,7 @@ func (m model) machine(name string) (int, error) {
 // View shows the top screen, every line cut to the window's width.
 func (m model) View() string {
 	if m.reports == nil {
-		return fmt.Sprintf("probing %d machines…\n", len(m.hosts))
+		return fmt.Sprintf("%s probing %d machines…\n", m.spin.View(), len(m.hosts))
 	}
 
 	lines := strings.Split(m.top().view(&m), "\n")
@@ -305,15 +325,64 @@ func (m model) View() string {
 	return strings.Join(lines, "\n")
 }
 
-// frame lays out a screen: a title line, the body, and a help line, unless the
-// command bar or a message takes its place.
-func (m *model) frame(title, body, help string) string {
-	bar := m.bar()
-	if bar == "" {
-		bar = dimStyle.Render(help)
+// frame draws a screen like k9s: its body in a rounded box, with the title on the
+// box's top edge and the status at its end. The help line follows, unless the
+// command bar or a message takes its place. The body is cut or padded to fill the
+// box, so the box fills the window.
+func (m *model) frame(title, status, body, help string) string {
+	inner := max(m.width-sides, 0)
+	edge := dimStyle.Render("│")
+
+	var b strings.Builder
+
+	fill := max(inner-6-ansi.StringWidth(title)-ansi.StringWidth(status), 1) // "╭─ " title " " fill " " status " ─╮"
+	b.WriteString(dimStyle.Render("╭─ ") + title + dimStyle.Render(" "+strings.Repeat("─", fill)+" ") + status + dimStyle.Render(" ─╮") + "\n")
+
+	lines := strings.Split(body, "\n")
+	for i := range max(m.height-chrome, 0) {
+		line := ""
+		if i < len(lines) {
+			line = ansi.Truncate(lines[i], inner, "…")
+		}
+
+		b.WriteString(edge + line + strings.Repeat(" ", inner-ansi.StringWidth(line)) + edge + "\n")
 	}
 
-	return title + "\n" + body + "\n" + bar
+	b.WriteString(dimStyle.Render("╰"+strings.Repeat("─", inner)+"╯") + "\n")
+
+	bar := m.bar()
+	if bar == "" {
+		bar = helpLine(help)
+	}
+
+	return b.String() + bar
+}
+
+// crumbs is a screen's title: sshwarm, then where the screen is, as in
+// "sshwarm › web-1 › stack db".
+func crumbs(where ...string) string {
+	title := pill("sshwarm")
+	for _, w := range where {
+		title += dimStyle.Render(" › ") + titleStyle.Render(w)
+	}
+
+	return title
+}
+
+// pill highlights text with the accent color as its background.
+func pill(text string) string { return pillStyle.Render(" " + text + " ") }
+
+// helpLine styles a screen's help, "key what · key what": the keys stand out in the
+// accent color, the rest is dim.
+func helpLine(help string) string {
+	var parts []string
+
+	for _, p := range strings.Split(help, " · ") {
+		key, what, _ := strings.Cut(p, " ")
+		parts = append(parts, keyStyle.Render(key)+" "+dimStyle.Render(what))
+	}
+
+	return strings.Join(parts, dimStyle.Render(" • "))
 }
 
 // bar is the command bar while it's open, or the message if there is one.
@@ -331,10 +400,10 @@ func (m *model) bar() string {
 // refreshStatus says when the reports were last refreshed.
 func (m model) refreshStatus() string {
 	if m.refreshing {
-		return "refreshing…"
+		return m.spin.View() + dimStyle.Render(" refreshing")
 	}
 
-	return "refreshed " + m.refreshed.Format(time.TimeOnly)
+	return dimStyle.Render("refreshed " + m.refreshed.Format(time.TimeOnly))
 }
 
 // Run browses the machines until the user quits.

@@ -19,7 +19,7 @@ func TestTones(t *testing.T) {
 	if m.tone != inherit {
 		t.Errorf("degraded machine row tone = %v", m.tone)
 	}
-	for i, want := range map[int]tone{1: warn, 2: warn, 5: warn, 6: bad, 7: bad, 3: inherit} {
+	for i, want := range map[int]tone{1: warn, 2: inherit, 3: inherit, 4: warn, 5: bad, 6: bad, 7: bad} {
 		if m.cells[i].tone != want {
 			t.Errorf("machine cell %d %q: tone %v, want %v", i, m.cells[i].text, m.cells[i].tone, want)
 		}
@@ -76,12 +76,12 @@ func TestGridRender(t *testing.T) {
 	g.key(tea.KeyMsg{Type: tea.KeyDown})
 
 	v := g.view()
-	if !strings.Contains(v, "\x1b[31m") || !strings.Contains(v, "\x1b[33m") || !strings.Contains(v, "\x1b[7") {
-		t.Errorf("expected red, yellow and the reversed selection in:\n%q", v)
+	if !strings.Contains(v, "\x1b[31m") || !strings.Contains(v, "\x1b[33m") || !strings.Contains(v, "▌") {
+		t.Errorf("expected red, yellow and the selection's marker in:\n%q", v)
 	}
 	lines := strings.Split(v, "\n")
 	want := lipgloss.Width(lines[0])
-	for i, l := range lines[:4] {
+	for i, l := range lines[:3] { // the header, then the rows: no rule between them
 		if w := lipgloss.Width(l); w != want {
 			t.Errorf("line %d is %d wide, header %d: %q", i, w, want, l)
 		}
