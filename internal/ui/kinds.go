@@ -20,8 +20,8 @@ type kind struct {
 	help   string   // its own keys, for the help line
 	titles []string
 	rows   func(m *model, host int, stack string) []row
-	enter  func(m *model, host int, key string) tea.Cmd // the next level; nil: the logs
-	logs   func(key string) (title, cmd string)         // nil: no logs
+	enter  func(m *model, host int, key string) tea.Cmd         // the next level; nil: the logs
+	logs   func(r swarm.Report, key string) (title, cmd string) // nil: no logs
 }
 
 // kinds are the command bar's resources.
@@ -39,7 +39,7 @@ func kindNamed(name string) *kind {
 
 // tabsOf lists a machine's kinds, in tab order: stacks and containers only with docker.
 func tabsOf(r swarm.Report) []*kind {
-	if r.HasDocker {
+	if r.Docker != "" {
 		return []*kind{services, stacks, containers}
 	}
 
@@ -115,7 +115,7 @@ func machineRow(r swarm.Report) row {
 	}
 
 	stackCell := cell{text: "-"}
-	if r.HasDocker {
+	if r.Docker != "" {
 		up := r.StacksUp()
 
 		stackCell.text = fmt.Sprintf("%d/%d", up, len(r.Stacks))
@@ -137,7 +137,7 @@ var services = &kind{
 	help:   "enter logs",
 	titles: []string{"UNIT", "ACTIVE", "SUB", "RESULT", "AGE", "DESCRIPTION"},
 	rows:   serviceRows,
-	logs:   func(unit string) (string, string) { return unit, swarm.UnitLogs(unit) },
+	logs:   func(_ swarm.Report, unit string) (string, string) { return unit, swarm.UnitLogs(unit) },
 }
 
 // serviceRows lists a machine's failed and enabled units, failed first; with m.all,
@@ -213,7 +213,9 @@ var stacks = &kind{
 		return rows
 	},
 	enter: func(m *model, host int, stack string) tea.Cmd { return m.push(newTable(containers, host, stack)) },
-	logs:  func(stack string) (string, string) { return "stack " + stack, swarm.StackLogs(stack) },
+	logs: func(r swarm.Report, stack string) (string, string) {
+		return "stack " + stack, swarm.StackLogs(r.Docker, stack)
+	},
 }
 
 // containers lists a machine's compose containers, or one stack's.
@@ -236,7 +238,9 @@ var containers = &kind{
 
 		return rows
 	},
-	logs: func(name string) (string, string) { return "container " + name, swarm.ContainerLogs(name) },
+	logs: func(r swarm.Report, name string) (string, string) {
+		return "container " + name, swarm.ContainerLogs(r.Docker, name)
+	},
 }
 
 func stackRow(s swarm.Stack) row {

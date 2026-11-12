@@ -127,10 +127,10 @@ func (t *table) logs(m *model) tea.Cmd {
 		return nil
 	}
 
-	h := m.reports[t.host].Host
-	title, cmd := t.kind.logs(key)
+	r := m.reports[t.host]
+	title, cmd := t.kind.logs(r, key)
 
-	return m.push(newText(h.Name+" · "+title, h, cmd))
+	return m.push(newText(r.Host.Name+" · "+title, r.Host, cmd))
 }
 
 // nextTab shows the machine's next kind, or with step -1 the previous one, if it

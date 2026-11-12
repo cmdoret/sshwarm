@@ -164,6 +164,7 @@ echo line-two
 // and the logs view wraps, goes fullscreen and copies.
 func TestNavigation(t *testing.T) {
 	r := fixture(t)
+	r.Docker = "docker" // the logs use the docker command the probe found
 	fakeBin(t, "ssh", `eval remote=\${$#}; echo "ran: $remote"; echo "`+strings.Repeat("y", 150)+` ENDOFLONGLINE"`)
 
 	var copied string
@@ -196,7 +197,7 @@ func TestNavigation(t *testing.T) {
 	s.keys("enter")
 	s.expect("app-node-argiope · stack cook", "containers 1", "cook-cookcli-1")
 	s.logs("l")
-	s.expect("app-node-argiope · container cook-cookcli-1", "ran: timeout 30 sudo -n docker logs --tail 300 'cook-cookcli-1'")
+	s.expect("app-node-argiope · container cook-cookcli-1", "ran: timeout 30 docker logs --tail 300 'cook-cookcli-1'")
 
 	// Wrapped, the long line's end shows; unwrapped, it's off the screen.
 	s.expect("ENDOFLONGLINE", "w wrap · f fullscreen · c copy")
