@@ -13,7 +13,7 @@ overnight and which container is crash-looping? **sshwarm** shows the whole swar
 glance, with the logs of whatever is red a keypress away.
 
 - **Every machine, one table:** uptime, pending reboot, systemd units, compose stacks.
-- **Agentless and read-only:** a small bash probe over your own `ssh`, with your keys, agent and `~/.ssh/config`. Nothing to install on the machines.
+- **Agentless:** a small bash probe over your own `ssh`, with your keys, agent and `~/.ssh/config`. Nothing to install on the machines.
 - **Scriptable:** `sshwarm status` prints the table and exits 1 when anything is wrong.
 
 ## Get it
@@ -67,5 +67,5 @@ flowchart LR
     sw -- "ssh, in parallel,<br>with ~/.ssh/config" --> m["each machine<br>runs probe.sh"]
     m -- "OS, reboot,<br>units, stacks" --> sw
     sw --> ui["browser:<br>machines, services,<br>stacks, containers"]
-    ui -. "logs, on demand" .-> m
+    ui -. "logs, describe, shell,<br>on demand" .-> m
 ```
