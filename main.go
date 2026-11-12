@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/cmdoret/sshwarm/internal/swarm"
@@ -75,7 +73,7 @@ func parseGlobal(args []string) (options, []string, error) {
 // Without a command, it opens the browser.
 func run(opts options, args []string) error {
 	if len(args) == 0 {
-		hosts, err := machines(context.Background(), opts, nil)
+		hosts, err := loadHosts(context.Background(), opts)
 		if err != nil {
 			return err
 		}
@@ -104,9 +102,14 @@ func statusCmd(opts options, args []string) error {
 
 	ctx := context.Background()
 
-	hosts, err := machines(ctx, opts, fs.Args())
+	hosts, err := loadHosts(ctx, opts)
 	if err != nil {
 		return err
+	}
+
+	hosts = swarm.Select(hosts, fs.Args())
+	if len(hosts) == 0 {
+		return fmt.Errorf("no machine matches %v", fs.Args())
 	}
 
 	if !ui.PrintStatus(os.Stdout, swarm.ProbeAll(ctx, hosts, opts.timeout)) {
@@ -127,16 +130,17 @@ func probeCmd(opts options, args []string) error {
 		return errors.New("probe takes one machine")
 	}
 
-	hosts, err := machines(context.Background(), opts, fs.Args())
+	hosts, err := loadHosts(context.Background(), opts)
 	if err != nil {
 		return err
 	}
 
-	if len(hosts) > 1 {
-		return fmt.Errorf("%q matches %d machines", fs.Arg(0), len(hosts))
+	i, err := swarm.Find(hosts, fs.Arg(0))
+	if err != nil {
+		return err
 	}
 
-	out, err := swarm.RunProbe(context.Background(), hosts[0], opts.timeout)
+	out, err := swarm.RunProbe(context.Background(), hosts[i], opts.timeout)
 	if err != nil {
 		return err
 	}
@@ -155,47 +159,13 @@ func newFlagSet(name string) *flag.FlagSet {
 	return fs
 }
 
-// machines loads the machines, from the hosts file or else the flake, and keeps
-// those named, or all without names.
-func machines(ctx context.Context, opts options, names []string) ([]swarm.Host, error) {
-	var (
-		hosts []swarm.Host
-		err   error
-	)
-
+// loadHosts loads the machines, from the hosts file or else the flake.
+func loadHosts(ctx context.Context, opts options) ([]swarm.Host, error) {
 	if opts.hosts != "" {
-		hosts, err = swarm.LoadFile(opts.hosts)
-	} else {
-		hosts, err = swarm.LoadFlake(ctx, opts.flake)
+		return swarm.LoadFile(opts.hosts)
 	}
 
-	if err != nil {
-		return nil, err
-	}
-
-	hosts = selectHosts(hosts, names)
-	if len(hosts) == 0 {
-		return nil, fmt.Errorf("no machine matches %v", names)
-	}
-
-	return hosts, nil
-}
-
-// selectHosts keeps the machines whose name contains one of names (argiope, garage).
-func selectHosts(hosts []swarm.Host, names []string) []swarm.Host {
-	if len(names) == 0 {
-		return hosts
-	}
-
-	var out []swarm.Host
-
-	for _, h := range hosts {
-		if slices.ContainsFunc(names, func(n string) bool { return strings.Contains(h.Name, n) }) {
-			out = append(out, h)
-		}
-	}
-
-	return out
+	return swarm.LoadFlake(ctx, opts.flake)
 }
 
 func usage() {

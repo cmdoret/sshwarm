@@ -1,6 +1,7 @@
 package swarm
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -73,6 +74,36 @@ name = "db"
 	} {
 		if _, err := load(content); err == nil || !strings.Contains(err.Error(), wantErr) {
 			t.Errorf("%q: got %v, want %q", content, err, wantErr)
+		}
+	}
+}
+
+func TestSelectFind(t *testing.T) {
+	hosts := []Host{{Name: "web"}, {Name: "web-1"}, {Name: "db-1"}}
+
+	if got := Select(hosts, []string{"web"}); len(got) != 2 {
+		t.Errorf("select web: %+v", got)
+	}
+
+	if got := Select(hosts, nil); len(got) != 3 {
+		t.Errorf("select nothing: %+v", got)
+	}
+
+	for name, want := range map[string]string{
+		"web":  "0",                       // the exact name, even with web-1 around
+		"db":   "2",                       // the only one containing it
+		"-1":   `"-1" matches 2 machines`, // ambiguous
+		"mail": `no machine matches "mail"`,
+	} {
+		i, err := Find(hosts, name)
+
+		got := fmt.Sprint(i)
+		if err != nil {
+			got = err.Error()
+		}
+
+		if got != want {
+			t.Errorf("find %q: got %s, want %s", name, got, want)
 		}
 	}
 }
