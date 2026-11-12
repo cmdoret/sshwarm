@@ -166,21 +166,22 @@ cat testdata/argiope.probe
 	}
 
 	// What the host sends is stripped of control characters (here, a clipboard write).
-	want := []string{"containers: no ]52;c;aGk=docker", "probe: timed out on the host"}
+	want := []string{"containers: no docker", "probe: timed out on the host"}
 	if r[3].Err != nil || !r[3].RebootPending || !slices.Equal(r[3].Errors, want) {
 		t.Errorf("half host: %v %q", r[3].Err, r[3].Errors)
 	}
 }
 
 func TestCleanLogLines(t *testing.T) {
-	fakeBin(t, "ssh", `printf 'user \033]52;c;aGk=\007logged in\r\n\tindented\n'`)
+	fakeBin(t, "ssh", `printf 'user \033]52;c;aGk=\007logged in\r\n\tindented\n\033[32m[Nest]\033[39m LOG\n'`)
 
 	var got []string
-	for line := range StreamLines(t.Context(), Host{Address: "h"}, "cmd", false) {
+	for line := range streamLines(t.Context(), Host{Address: "h"}, false, "cmd") {
 		got = append(got, line)
 	}
 
-	if want := []string{"user ]52;c;aGk=logged in", "\tindented"}; !slices.Equal(got, want) {
+	// No escape sequence, colors included, and no stray carriage return.
+	if want := []string{"user logged in", "\tindented", "[Nest] LOG"}; !slices.Equal(got, want) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
