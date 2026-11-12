@@ -7,33 +7,40 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+var (
+	tabStyle   = lipgloss.NewStyle().Padding(0, 1)
+	onTabStyle = tabStyle.Reverse(true)
 )
 
 // table is a screen listing the rows of one kind: the machines, or a machine's
-// services or stacks.
+// services, stacks or containers.
 type table struct {
 	kind   *kind
-	host   int             // index in the reports; -1 for the machines
+	host   int             // index in the reports; unused for the machines
+	stack  string          // containers: only this stack's; "" for all
 	filter textinput.Model // on the rows' keys
 	grid   grid
 }
 
-func newTable(k *kind, host int) *table {
+func newTable(k *kind, host int, stack string) *table {
 	f := textinput.New()
 	f.Prompt = "/"
 
-	return &table{kind: k, host: host, filter: f, grid: newGrid(k.titles...)}
+	return &table{kind: k, host: host, stack: stack, filter: f, grid: grid{titles: k.titles}}
 }
 
 func (t *table) open(m *model) tea.Cmd {
-	t.refresh(m)
+	t.fill(m)
 
 	return nil
 }
 
-// refresh rebuilds the rows from the reports.
-func (t *table) refresh(m *model) {
-	t.grid.setRows(matching(t.kind.rows(m, t.host), t.filter.Value()))
+// fill rebuilds the rows from the reports.
+func (t *table) fill(m *model) {
+	t.grid.setRows(matching(t.kind.rows(m, t.host, t.stack), t.filter.Value()))
 }
 
 // matching keeps the rows whose key contains query, ignoring case.
@@ -44,33 +51,39 @@ func matching(rows []row, query string) []row {
 }
 
 func (t *table) resize(width, height int) {
-	chrome := 2 // the title and help lines that view draws
-	if t.host >= 0 {
-		chrome = 3 // and the tabs
+	lines := chrome
+	if t.kind != machines {
+		lines++ // the tabs
 	}
 
-	t.grid.width, t.grid.height = width, max(height-chrome, 3)
+	t.grid.width, t.grid.height = width, max(height-lines, 3)
 	t.grid.clamp()
 }
 
 func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
-	if t.filter.Focused() {
-		return t.filterKey(m, k)
-	}
-
 	switch k.String() {
 	case "esc":
 		m.pop()
 	case "tab":
-		t.nextTab(m)
+		t.nextTab(m, 1)
+	case "shift+tab":
+		t.nextTab(m, -1)
 	case "a":
-		m.all = !m.all
-		m.rows()
+		if t.kind == services {
+			m.all = !m.all
+			m.fillTables()
+		}
 	case "/":
 		return t.filter.Focus()
+	case "l":
+		return t.logs(m)
 	case "enter":
-		if len(t.grid.rows) > 0 {
-			return t.kind.enter(m, t.host, t.grid.rows[t.grid.cursor].key)
+		if t.kind.enter == nil {
+			return t.logs(m)
+		}
+
+		if key, ok := t.selected(); ok {
+			return t.kind.enter(m, t.host, key)
 		}
 	default:
 		t.grid.key(k)
@@ -93,14 +106,37 @@ func (t *table) filterKey(m *model, k tea.KeyMsg) tea.Cmd {
 		t.filter, cmd = t.filter.Update(k)
 	}
 
-	t.refresh(m)
+	t.fill(m)
 
 	return cmd
 }
 
-// nextTab shows the machine's next kind, if it has more than one.
-func (t *table) nextTab(m *model) {
-	if t.host < 0 {
+// selected is the key of the row under the cursor, if there is one.
+func (t *table) selected() (string, bool) {
+	if len(t.grid.rows) == 0 {
+		return "", false
+	}
+
+	return t.grid.rows[t.grid.cursor].key, true
+}
+
+// logs opens the logs of the row under the cursor, if its kind has any.
+func (t *table) logs(m *model) tea.Cmd {
+	key, ok := t.selected()
+	if !ok || t.kind.logs == nil {
+		return nil
+	}
+
+	h := m.reports[t.host].Host
+	title, cmd := t.kind.logs(key)
+
+	return m.push(newText(h.Name+" · "+title, h, cmd))
+}
+
+// nextTab shows the machine's next kind, or with step -1 the previous one, if it
+// has more than one.
+func (t *table) nextTab(m *model, step int) {
+	if t.kind == machines {
 		return
 	}
 
@@ -109,10 +145,10 @@ func (t *table) nextTab(m *model) {
 		return
 	}
 
-	t.kind = tabs[(slices.Index(tabs, t.kind)+1)%len(tabs)]
-	t.grid = newGrid(t.kind.titles...)
+	t.kind, t.stack = tabs[(slices.Index(tabs, t.kind)+step+len(tabs))%len(tabs)], ""
+	t.grid = grid{titles: t.kind.titles}
 	t.resize(m.width, m.height)
-	t.refresh(m)
+	t.fill(m)
 }
 
 func (t *table) view(m *model) string {
@@ -121,34 +157,45 @@ func (t *table) view(m *model) string {
 		filter = "  " + t.filter.View()
 	}
 
-	if t.host < 0 {
+	if t.kind == machines {
 		title := titleStyle.Render("sshwarm") + dimStyle.Render(fmt.Sprintf(" · %d machines · %s", len(m.reports), m.refreshStatus()))
 
-		return frame(title+filter, t.grid.view(), "enter open · / filter · r refresh · q quit")
+		return m.frame(title+filter, t.grid.view(), t.kind.help+" · / filter · : go to · r refresh · q quit")
 	}
 
 	r := m.reports[t.host]
-	title := titleStyle.Render(r.Host.Name) + dimStyle.Render(fmt.Sprintf(" · %s · up %s · %s", r.OS, short(r.Uptime), m.refreshStatus()))
 
-	if r.Err != nil { // went down since we opened it
-		return frame(title, toneStyles[bad].Render("down: "+r.Err.Error()), "r refresh · esc back · q quit")
+	name := r.Host.Name
+	if t.stack != "" {
+		name += " · stack " + t.stack
 	}
 
-	var bar string
+	title := titleStyle.Render(name) + dimStyle.Render(fmt.Sprintf(" · %s · up %s · %s", r.OS, short(r.Uptime), m.refreshStatus()))
+
+	if r.Err != nil {
+		return m.frame(title, toneStyles[bad].Render("down: "+r.Err.Error()), "r refresh · esc back · q quit")
+	}
+
+	var tabs string
 
 	for _, k := range tabsOf(r) {
-		style := tabStyle
-		if k == t.kind {
-			style = onTabStyle
+		n, style := len(t.grid.rows), onTabStyle // the current tab: its rows, as shown
+		if k != t.kind {
+			n, style = len(matching(k.rows(m, t.host, ""), t.filter.Value())), tabStyle
 		}
 
-		bar += style.Render(fmt.Sprintf("%s %d", k.name, len(matching(k.rows(m, t.host), t.filter.Value()))))
+		tabs += style.Render(fmt.Sprintf("%s %d", k.names[0], n))
 	}
 
-	scope := "a all units"
-	if m.all {
-		scope = "a interesting units"
+	help := t.kind.help
+	if t.kind == services {
+		scope := "all"
+		if m.all {
+			scope = "interesting"
+		}
+
+		help += " · a " + scope + " units"
 	}
 
-	return frame(title, bar+filter+"\n"+t.grid.view(), "enter logs · tab switch · / filter · "+scope+" · r refresh · esc back · q quit")
+	return m.frame(title, tabs+filter+"\n"+t.grid.view(), help+" · tab switch · / filter · : go to · esc back · q quit")
 }
