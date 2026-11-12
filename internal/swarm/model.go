@@ -9,7 +9,7 @@ import (
 
 // Host is a machine sshwarm watches: its name, and how to reach it over ssh.
 type Host struct {
-	Name    string   // as the flake names it, e.g. web-1
+	Name    string   // as the flake or hosts file names it, e.g. web-1
 	Address string   // ssh destination, user@hostname
 	Opts    []string // extra ssh options
 }
@@ -20,12 +20,12 @@ type Report struct {
 	Host          Host
 	Err           error
 	Errors        []string
+	OS            string    // e.g. Debian GNU/Linux 12 (bookworm)
 	Now           time.Time // the host's clock: ages are computed against it
 	Uptime        time.Duration
-	Deployed      time.Time
+	Deployed      time.Time // NixOS: the last deploy; zero elsewhere
 	RebootPending bool
-	Version       string
-	Revision      string // git commit the system was built from, "" if unknown
+	Revision      string // NixOS: the git commit the system was built from, if set
 	Units         []Unit
 	HasDocker     bool
 	Stacks        []Stack

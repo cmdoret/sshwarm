@@ -1,5 +1,5 @@
-// sshwarm shows the state of the machines deployed from the flake: deployed commit,
-// uptime, failed units, compose stacks, and their logs. Read-only.
+// sshwarm shows the state of Linux machines over ssh: uptime, pending reboots,
+// failed units, compose stacks, and their logs. Read-only.
 package main
 
 import (
@@ -29,7 +29,7 @@ var errReported = errors.New("reported")
 
 // options are the global flags, given before the command.
 type options struct {
-	flake            string
+	hosts, flake     string
 	timeout, refresh time.Duration
 }
 
@@ -61,6 +61,7 @@ func parseGlobal(args []string) (options, []string, error) {
 	var opts options
 
 	fs := newFlagSet("sshwarm")
+	fs.StringVar(&opts.hosts, "hosts", os.Getenv("SSHWARM_HOSTS"), "")
 	fs.StringVar(&opts.flake, "flake", cmp.Or(os.Getenv("SSHWARM_FLAKE"), "."), "")
 	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "")
 	fs.DurationVar(&opts.refresh, "refresh", defaultRefresh, "")
@@ -74,7 +75,12 @@ func parseGlobal(args []string) (options, []string, error) {
 // Without a command, it opens the browser.
 func run(opts options, args []string) error {
 	if len(args) == 0 {
-		return ui.Run(opts.flake, opts.timeout, opts.refresh)
+		hosts, err := machines(context.Background(), opts, nil)
+		if err != nil {
+			return err
+		}
+
+		return ui.Run(hosts, opts.timeout, opts.refresh)
 	}
 
 	switch args[0] {
@@ -98,7 +104,7 @@ func statusCmd(opts options, args []string) error {
 
 	ctx := context.Background()
 
-	hosts, err := machines(ctx, opts.flake, fs.Args())
+	hosts, err := machines(ctx, opts, fs.Args())
 	if err != nil {
 		return err
 	}
@@ -121,7 +127,7 @@ func probeCmd(opts options, args []string) error {
 		return errors.New("probe takes one machine")
 	}
 
-	hosts, err := machines(context.Background(), opts.flake, fs.Args())
+	hosts, err := machines(context.Background(), opts, fs.Args())
 	if err != nil {
 		return err
 	}
@@ -149,9 +155,20 @@ func newFlagSet(name string) *flag.FlagSet {
 	return fs
 }
 
-// machines loads the flake's machines and keeps those named, or all without names.
-func machines(ctx context.Context, flake string, names []string) ([]swarm.Host, error) {
-	hosts, err := swarm.LoadFlake(ctx, flake)
+// machines loads the machines, from the hosts file or else the flake, and keeps
+// those named, or all without names.
+func machines(ctx context.Context, opts options, names []string) ([]swarm.Host, error) {
+	var (
+		hosts []swarm.Host
+		err   error
+	)
+
+	if opts.hosts != "" {
+		hosts, err = swarm.LoadFile(opts.hosts)
+	} else {
+		hosts, err = swarm.LoadFlake(ctx, opts.flake)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -189,10 +206,14 @@ func usage() {
   probe <machine>       print a machine's raw probe output (debugging, test fixtures)
   help                  print this message
 
-A machine is named by any part of its name: web-1, or web for all web machines.
+The machines come from a hosts file, or else from a flake's deploy.nodes. A hosts
+file has a [[host]] table per machine: its name, and optionally host (the name by
+default), user and key; the rest comes from ~/.ssh/config. A machine is named by
+any part of its name: web-1, or web for all web machines.
 
 Flags, before the command:
 
+  --hosts <file>         the TOML hosts file (default: $SSHWARM_HOSTS)
   --flake <dir>          the flake defining deploy.nodes (default: $SSHWARM_FLAKE, or .)
   --timeout <duration>   probe timeout, per machine (default: %v)
   --refresh <duration>   how often the browser refreshes (default: %v)
