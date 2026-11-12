@@ -1,15 +1,16 @@
-package swarm
+package ui
 
 import (
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
-	"text/tabwriter"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+
+	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
 // tone colors a row, or one cell when it alone needs attention (like k9s).
@@ -47,7 +48,7 @@ func (c cell) shown() string {
 type row struct {
 	cells []cell
 	tone  tone
-	key   string // what the row is about: a unit or stack name
+	key   string // what the row is about: a machine, unit or stack name
 }
 
 func dot(t tone, text string) cell { return cell{text, t, true} }
@@ -154,13 +155,13 @@ var machineTitles = []string{"MACHINE", "STATE", "REV", "DEPLOYED", "GEN", "UPTI
 
 // machineRow is a machine's row, for both the TUI and `sshwarm status`. Only the
 // fields needing attention are colored, unless the machine is down.
-func machineRow(r Report) row {
+func machineRow(r swarm.Report) row {
 	if r.Err != nil {
 		cells := []cell{{text: r.Host.Name}, dot(bad, "down")}
 		for range len(machineTitles) - 3 { // all but MACHINE, STATE and PROBLEMS
 			cells = append(cells, cell{text: "-"})
 		}
-		return row{tone: bad, cells: append(cells, cell{text: r.Err.Error()})}
+		return row{tone: bad, key: r.Host.Name, cells: append(cells, cell{text: r.Err.Error()})}
 	}
 	problems := r.Problems()
 	state := dot(good, "ok")
@@ -195,11 +196,11 @@ func machineRow(r Report) row {
 			stacks.tone = bad
 		}
 	}
-	return row{cells: []cell{{text: r.Host.Name}, state, rev, deployed, {text: strconv.Itoa(r.Generation)},
+	return row{key: r.Host.Name, cells: []cell{{text: r.Host.Name}, state, rev, deployed, {text: strconv.Itoa(r.Generation)},
 		{text: short(r.Uptime)}, reboot, failed, stacks, {text: strings.Join(problems, "; "), tone: bad}}}
 }
 
-func unitRow(r Report, u Unit) row {
+func unitRow(r swarm.Report, u swarm.Unit) row {
 	age := "-"
 	if !u.Since.IsZero() {
 		age = short(r.Age(u.Since))
@@ -223,7 +224,7 @@ func unitRow(r Report, u Unit) row {
 }
 
 // containerTone rates c: restarting is a crash loop, so bad; starting is fine for now.
-func containerTone(c Container) tone {
+func containerTone(c swarm.Container) tone {
 	switch {
 	case !c.OK():
 		return bad
@@ -233,7 +234,7 @@ func containerTone(c Container) tone {
 	return good
 }
 
-func stackRow(s Stack) row {
+func stackRow(s swarm.Stack) row {
 	worst := good
 	var problems []string
 	for _, c := range s.Containers {
@@ -251,38 +252,28 @@ func stackRow(s Stack) row {
 	return r
 }
 
-// PrintStatus writes the machines table, then what's wrong.
-// It returns false if any machine is unreachable or has a problem.
-func PrintStatus(w io.Writer, reports []Report) bool {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	columns := len(machineTitles) - 1 // PROBLEMS go below the table
-	fmt.Fprintln(tw, strings.Join(machineTitles[:columns], "\t"))
-
-	var details []string
-
-	for _, r := range reports {
-		var cells []string
-		for _, c := range machineRow(r).cells[:columns] {
-			cells = append(cells, c.text)
-		}
-
-		fmt.Fprintln(tw, strings.Join(cells, "\t"))
-
-		sep := " "
-		if r.Err != nil {
-			sep = ": "
-		}
-
-		for _, p := range r.Problems() {
-			details = append(details, r.Host.Name+sep+p)
-		}
+// short formats a duration as its largest unit: 45s, 12m, 5h, 3d.
+func short(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return strconv.Itoa(int(d.Seconds())) + "s"
+	case d < time.Hour:
+		return strconv.Itoa(int(d.Minutes())) + "m"
+	case d < 48*time.Hour:
+		return strconv.Itoa(int(d.Hours())) + "h"
 	}
+	return strconv.Itoa(int(d.Hours()/24)) + "d"
+}
 
-	tw.Flush()
-
-	if len(details) > 0 {
-		fmt.Fprintf(w, "\n%s\n", strings.Join(details, "\n"))
+// shortRev keeps 7 characters of a commit, and its -dirty suffix.
+func shortRev(rev string) string {
+	if rev == "" {
+		return "-"
 	}
-
-	return len(details) == 0
+	rev, dirty := strings.CutSuffix(rev, "-dirty")
+	rev = rev[:min(len(rev), 7)]
+	if dirty {
+		rev += "-dirty"
+	}
+	return rev
 }

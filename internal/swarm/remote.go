@@ -10,18 +10,22 @@ import (
 	"strings"
 )
 
-// unitLogs and stackLogs are the remote commands behind the logs view, run with logCmd.
-func unitLogs(unit string) string {
+// dockerCmd is how to run docker on h: as root, without a password prompt.
+// Every docker command sshwarm runs, the probe's included, starts with it.
+func dockerCmd(Host) string { return "sudo -n docker" }
+
+// UnitLogs and StackLogs are the remote commands behind the logs view, run with LogCmd.
+func UnitLogs(_ Host, unit string) string {
 	return "journalctl -u " + quote(unit) + " -n 300 -o short-iso --no-pager"
 }
 
-func stackLogs(stack string) string {
-	return "sudo -n docker compose -p " + quote(stack) + " logs --tail 300 --no-color"
+func StackLogs(h Host, stack string) string {
+	return dockerCmd(h) + " compose -p " + quote(stack) + " logs --tail 300 --no-color"
 }
 
-// logCmd adds -f to follow; otherwise the command stops on its own on the host.
+// LogCmd adds -f to follow; otherwise the command stops on its own on the host.
 // When following, the terminal hangs it up when we leave.
-func logCmd(cmd string, follow bool) string {
+func LogCmd(cmd string, follow bool) string {
 	if follow {
 		return cmd + " -f"
 	}
@@ -30,10 +34,10 @@ func logCmd(cmd string, follow bool) string {
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// streamLines runs remote on h and sends its output, stdout and stderr, line by line,
+// StreamLines runs remote on h and sends its output, stdout and stderr, line by line,
 // without control characters. The channel closes when the command ends or ctx is
 // cancelled. tty: see sshCmd.
-func streamLines(ctx context.Context, h Host, remote string, tty bool) <-chan string {
+func StreamLines(ctx context.Context, h Host, remote string, tty bool) <-chan string {
 	cmd := sshCmd(ctx, h, true, tty, remote)
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw

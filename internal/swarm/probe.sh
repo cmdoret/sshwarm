@@ -1,8 +1,9 @@
-# Read-only probe that `sshwarm` pipes to each machine: ssh <host> timeout <s> bash -s.
+# Read-only probe that `sshwarm` pipes to each machine:
+#   ssh <host> timeout <s> bash -s -- '<docker command>'   e.g. 'sudo -n docker'
 # Prints sections: a "### <name>" line, then that command's output.
 # A command that fails prints "### error <name>" and its message instead.
-# Only docker needs root.
 export LC_ALL=C
+docker_cmd=${1:-docker} # words, split on purpose below
 
 section() {
   name=$1
@@ -35,6 +36,6 @@ section units systemctl list-units --type=service --all --output=json --no-pager
 section show systemctl show --timestamp=unix --all --no-pager \
   -p Id,Result,UnitFileState,StateChangeTimestamp '*.service'
 if [ "$docker" = true ]; then
-  section containers sudo -n docker ps -a --filter label=com.docker.compose.project \
+  section containers $docker_cmd ps -a --filter label=com.docker.compose.project \
     --format '{{.Label "com.docker.compose.project"}}\t{{.Names}}\t{{.State}}\t{{.Status}}'
 fi

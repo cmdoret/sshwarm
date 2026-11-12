@@ -1,4 +1,4 @@
-package swarm
+package ui
 
 import (
 	"strings"
@@ -7,6 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+
+	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
 func TestTones(t *testing.T) {
@@ -22,11 +24,14 @@ func TestTones(t *testing.T) {
 			t.Errorf("machine cell %d %q: tone %v, want %v", i, m.cells[i].text, m.cells[i].tone, want)
 		}
 	}
-	if down := machineRow(Report{Host: Host{Name: "x"}, Err: errTest}); down.tone != bad {
+	if down := machineRow(swarm.Report{Host: swarm.Host{Name: "x"}, Err: errTest}); down.tone != bad {
 		t.Error("down machine not red")
 	}
+	if state := machineRow(swarm.Report{Errors: []string{"version: not found"}}).cells[1].text; state != "degraded" {
+		t.Errorf("a failed probe command: state %q", state)
+	}
 
-	units := map[string]Unit{}
+	units := map[string]swarm.Unit{}
 	for _, u := range r.Units {
 		units[u.Name] = u
 	}
@@ -36,10 +41,10 @@ func TestTones(t *testing.T) {
 	if u := unitRow(r, units["glances.service"]); u.tone != inherit || u.cells[0].tone != good {
 		t.Errorf("running unit: %+v", u)
 	}
-	if u := unitRow(r, Unit{Name: "x", Active: "activating"}); u.tone != inherit || u.cells[0].tone != warn {
+	if u := unitRow(r, swarm.Unit{Name: "x", Active: "activating"}); u.tone != inherit || u.cells[0].tone != warn {
 		t.Errorf("starting unit: %+v", u)
 	}
-	if u := unitRow(r, Unit{Name: "x", Active: "inactive", Result: "success"}); u.tone != dim {
+	if u := unitRow(r, swarm.Unit{Name: "x", Active: "inactive", Result: "success"}); u.tone != dim {
 		t.Errorf("inactive unit: %+v", u)
 	}
 
@@ -53,7 +58,7 @@ func TestTones(t *testing.T) {
 	if s := stacks["utils"]; s.tone != inherit || s.cells[0].tone != good {
 		t.Errorf("healthy stack (init container done): %+v", s)
 	}
-	starting := Stack{Name: "s", Containers: []Container{{State: "running", Status: "Up 3 seconds (health: starting)"}}}
+	starting := swarm.Stack{Name: "s", Containers: []swarm.Container{{State: "running", Status: "Up 3 seconds (health: starting)"}}}
 	if s := stackRow(starting); s.tone != inherit || s.cells[0].tone != warn {
 		t.Errorf("starting stack: %+v", s)
 	}
@@ -68,7 +73,7 @@ func TestGridRender(t *testing.T) {
 	g := newGrid(machineTitles...)
 	g.widths = []int{18, 10, 13, 8, 4, 6, 6, 6, 6, 30}
 	g.height = 6
-	g.SetRows([]row{machineRow(r), machineRow(Report{Host: Host{Name: "garage-node-neatus"}, Err: errTest})})
+	g.SetRows([]row{machineRow(r), machineRow(swarm.Report{Host: swarm.Host{Name: "garage-node-neatus"}, Err: errTest})})
 	g.Update(tea.KeyMsg{Type: tea.KeyDown})
 
 	v := g.View()

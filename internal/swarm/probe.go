@@ -1,5 +1,5 @@
-// Package swarm probes machines over ssh, read-only, and shows what it finds:
-// a status table, and a TUI with their services, stacks and logs.
+// Package swarm talks to the machines over ssh: it lists them, probes them, and
+// streams their logs. Read-only.
 package swarm
 
 import (
@@ -45,9 +45,9 @@ func sshCmd(ctx context.Context, h Host, mux, tty bool, remote string) *exec.Cmd
 	return cmd
 }
 
-// LoadHosts reads deploy.nodes from the flake in flakeDir, with deploy-rs's
+// LoadFlake reads deploy.nodes from the flake in flakeDir, with deploy-rs's
 // defaults for sshUser and sshOpts.
-func LoadHosts(ctx context.Context, flakeDir string) ([]Host, error) {
+func LoadFlake(ctx context.Context, flakeDir string) ([]Host, error) {
 	// Absolute, or nix reads a bare "nix" as the registry's github:NixOS/nix.
 	dir, err := filepath.Abs(flakeDir)
 	if err != nil {
@@ -104,12 +104,15 @@ func ProbeAll(ctx context.Context, hosts []Host, timeout time.Duration, mux bool
 }
 
 func probe(ctx context.Context, h Host, mux bool) Report {
-	r := Report{Host: h}
 	out, err := RunProbe(ctx, h, mux)
+
+	var r Report
 	if err == nil {
-		err = parse(&r, out)
+		r, err = Parse(out)
 	}
-	r.Err = err
+
+	r.Host, r.Err = h, err
+
 	return r
 }
 
@@ -121,7 +124,7 @@ func RunProbe(ctx context.Context, h Host, mux bool) (string, error) {
 	if d, ok := ctx.Deadline(); ok {
 		secs = max(int(time.Until(d).Seconds())-2, 1)
 	}
-	cmd := sshCmd(ctx, h, mux, false, fmt.Sprintf("timeout %d bash -s", secs))
+	cmd := sshCmd(ctx, h, mux, false, fmt.Sprintf("timeout %d bash -s -- %s", secs, quote(dockerCmd(h))))
 	cmd.Stdin = strings.NewReader(probeScript)
 
 	var stderr bytes.Buffer
@@ -168,13 +171,15 @@ func sections(out string) map[string]string {
 	return s
 }
 
-// parse fills r from the probe output. Only a missing meta section is fatal:
-// a command that failed, or output that doesn't parse, becomes one of r.Errors.
-func parse(r *Report, out string) error {
+// Parse reads a probe's output, as RunProbe returns it. Only a missing meta section
+// is an error: a command that failed, or output that doesn't parse, becomes one of
+// Report.Errors.
+func Parse(out string) (Report, error) {
+	var r Report
 	sec := sections(out)
 	meta, ok := sec["meta"]
 	if !ok {
-		return errors.New("no probe output")
+		return r, errors.New("no probe output")
 	}
 	kv := keyValues(meta)
 	r.Now = unix(kv["now"])
@@ -202,12 +207,12 @@ func parse(r *Report, out string) error {
 	}
 	raw, ok := sec["units"]
 	if !ok {
-		return nil
+		return r, nil
 	}
 	var units []struct{ Unit, Active, Sub, Description string }
 	if err := json.Unmarshal([]byte(raw), &units); err != nil {
 		r.Errors = append(r.Errors, "units: "+err.Error())
-		return nil
+		return r, nil
 	}
 	props := map[string]map[string]string{}
 	for _, block := range strings.Split(sec["show"], "\n\n") {
@@ -222,7 +227,7 @@ func parse(r *Report, out string) error {
 			Since: unix(strings.TrimPrefix(p["StateChangeTimestamp"], "@")),
 		})
 	}
-	return nil
+	return r, nil
 }
 
 // parseStacks groups the containers (project, name, state, status per line) by
