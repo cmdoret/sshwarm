@@ -13,9 +13,6 @@ import (
 )
 
 const (
-	// docker commands sshwarm runs starts with it, the probe's included.
-	docker = "sudo -n docker"
-
 	// logTail is the history a logs view opens with.
 	logTail = 300
 
@@ -52,12 +49,13 @@ func UnitLogs(unit string) string {
 }
 
 // StackLogs is the log command of a compose stack, all its containers, for Logs.
-func StackLogs(stack string) string {
+// docker is the command that reaches docker on the host: Report.Docker.
+func StackLogs(docker, stack string) string {
 	return fmt.Sprintf("%s compose -p %s logs --tail %d --no-color", docker, quote(stack), logTail)
 }
 
-// ContainerLogs is the log command of one container, for Logs.
-func ContainerLogs(container string) string {
+// ContainerLogs is the log command of one container, for Logs. docker: see StackLogs.
+func ContainerLogs(docker, container string) string {
 	return fmt.Sprintf("%s logs --tail %d %s", docker, logTail, quote(container))
 }
 

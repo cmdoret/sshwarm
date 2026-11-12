@@ -56,7 +56,7 @@ func RunProbe(ctx context.Context, h Host, timeout time.Duration) (string, error
 	// The probe stops on its own on the host, a bit before we give up: without a
 	// terminal, killing ssh wouldn't stop a command stuck there (a hung docker ps).
 	onHost := max(int(timeout.Seconds())-2, 1)
-	cmd := sshCmd(ctx, h, false, fmt.Sprintf("timeout %d bash -s -- %s", onHost, quote(docker)))
+	cmd := sshCmd(ctx, h, false, fmt.Sprintf("timeout %d bash -s", onHost))
 	cmd.Stdin = strings.NewReader(probeScript)
 
 	var stderr bytes.Buffer
@@ -111,7 +111,7 @@ func Parse(out string) (Report, error) {
 		Now:           unix(kv["now"]),
 		Deployed:      unix(kv["deployed"]),
 		RebootPending: kv["reboot"] == "true",
-		HasDocker:     kv["docker"] == "true",
+		Docker:        kv["docker"],
 		Units:         parseUnits(sec["units"]),
 		Stacks:        parseStacks(sec["containers"]),
 	}
