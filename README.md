@@ -58,3 +58,14 @@ key  = "~/.ssh/web"
 Only `name` is required. ssh looks up `host`, or else `name`, in `~/.ssh/config` for
 anything not set in the file, like ports or jump hosts. Set `SSHWARM_HOSTS` or
 `SSHWARM_FLAKE` to skip the flag. The rest: `sshwarm help`.
+
+## How it works
+
+```mermaid
+flowchart LR
+    src["hosts.toml or flake.nix"] --> sw[sshwarm]
+    sw -- "ssh, in parallel,<br>with ~/.ssh/config" --> m["each machine<br>runs probe.sh"]
+    m -- "OS, reboot,<br>units, stacks" --> sw
+    sw --> ui["browser:<br>machines, services, stacks"]
+    ui -. "logs, on demand" .-> m
+```
