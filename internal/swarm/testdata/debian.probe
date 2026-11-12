@@ -1,0 +1,22 @@
+### meta
+os=Debian GNU/Linux 12 (bookworm)
+now=1794300000
+uptime=3600.10
+reboot=true
+docker=false
+### units
+Id=ssh.service
+Description=OpenBSD Secure Shell server
+ActiveState=active
+SubState=running
+UnitFileState=enabled
+StateChangeTimestamp=@1794296400
+Result=success
+
+Id=pveproxy.service
+Description=PVE API Proxy Server
+ActiveState=active
+SubState=running
+UnitFileState=enabled
+StateChangeTimestamp=@1794296410
+Result=success

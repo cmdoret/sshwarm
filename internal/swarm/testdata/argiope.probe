@@ -1,11 +1,11 @@
 ### meta
+os=NixOS 26.05 (Yarara)
 now=1794300000
 uptime=90061.52
 deployed=1794292800
+revision=0123456789abcdef0123456789abcdef01234567-dirty
 reboot=true
 docker=true
-### version
-{"nixosVersion":"26.05.20261105.c56a87d","nixpkgsRevision":"c56a87d","configurationRevision":"0123456789abcdef0123456789abcdef01234567-dirty"}
 ### units
 Id=compose-immich.service
 Description=compose stack immich
