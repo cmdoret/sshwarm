@@ -39,7 +39,7 @@ nix run github:cmdoret/sshwarm -- --hosts hosts.toml
 ## Use
 
 ```sh
-sshwarm --hosts hosts.toml         # browse: machines, then services and stacks, then logs
+sshwarm --hosts hosts.toml         # browse: machines, services, stacks, containers, logs; :ctr web-1 jumps
 sshwarm --flake ./nix status web   # the table, for the machines whose name contains "web"
 ```
 
@@ -66,6 +66,6 @@ flowchart LR
     src["hosts.toml or flake.nix"] --> sw[sshwarm]
     sw -- "ssh, in parallel,<br>with ~/.ssh/config" --> m["each machine<br>runs probe.sh"]
     m -- "OS, reboot,<br>units, stacks" --> sw
-    sw --> ui["browser:<br>machines, services, stacks"]
+    sw --> ui["browser:<br>machines, services,<br>stacks, containers"]
     ui -. "logs, on demand" .-> m
 ```
