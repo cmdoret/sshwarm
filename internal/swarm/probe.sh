@@ -3,7 +3,7 @@
 # Prints sections: a "### <name>" line, then that command's output.
 # A command that fails prints "### error <name>" and its message instead.
 export LC_ALL=C
-docker_cmd=${1:-docker} # words, split on purpose below
+docker_cmd=$1 # words, split on purpose below
 
 section() {
   name=$1
@@ -18,8 +18,7 @@ section() {
 echo "### meta"
 echo "now=$(date +%s)"
 echo "uptime=$(cut -d' ' -f1 /proc/uptime)"
-if link=$(readlink /nix/var/nix/profiles/system); then # system-<generation>-link
-  echo "generation=$(echo "$link" | tr -dc 0-9)"
+if link=$(readlink /nix/var/nix/profiles/system); then # system-<generation>-link, made at deploy
   echo "deployed=$(stat -c %Y "/nix/var/nix/profiles/$link")"
 fi
 reboot=false
@@ -32,9 +31,8 @@ command -v docker >/dev/null && docker=true
 echo "docker=$docker"
 
 section version nixos-version --json
-section units systemctl list-units --type=service --all --output=json --no-pager
-section show systemctl show --timestamp=unix --all --no-pager \
-  -p Id,Result,UnitFileState,StateChangeTimestamp '*.service'
+section units systemctl show --timestamp=unix --no-pager \
+  -p Id,ActiveState,SubState,Description,Result,UnitFileState,StateChangeTimestamp '*.service'
 if [ "$docker" = true ]; then
   section containers $docker_cmd ps -a --filter label=com.docker.compose.project \
     --format '{{.Label "com.docker.compose.project"}}\t{{.Names}}\t{{.State}}\t{{.Status}}'

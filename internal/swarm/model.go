@@ -7,11 +7,11 @@ import (
 	"unicode"
 )
 
-// Host is one entry of the flake's deploy.nodes.
+// Host is a machine sshwarm watches: its name, and how to reach it over ssh.
 type Host struct {
-	Name    string   // nixosConfigurations name, e.g. app-node-argiope
+	Name    string   // as the flake names it, e.g. web-1
 	Address string   // ssh destination, user@hostname
-	Opts    []string // the node's sshOpts
+	Opts    []string // extra ssh options
 }
 
 // Report is what one probe found on one host. Err is set when the probe failed;
@@ -22,7 +22,6 @@ type Report struct {
 	Errors        []string
 	Now           time.Time // the host's clock: ages are computed against it
 	Uptime        time.Duration
-	Generation    int
 	Deployed      time.Time
 	RebootPending bool
 	Version       string
@@ -53,28 +52,32 @@ type Stack struct {
 // Failed returns the units in the failed state.
 func (r Report) Failed() []Unit {
 	var out []Unit
+
 	for _, u := range r.Units {
 		if u.Active == "failed" {
 			out = append(out, u)
 		}
 	}
+
 	return out
 }
 
 // StacksUp counts the stacks whose containers are all OK.
 func (r Report) StacksUp() int {
 	n := 0
+
 	for _, s := range r.Stacks {
 		if len(s.Bad()) == 0 {
 			n++
 		}
 	}
+
 	return n
 }
 
 // OK reports whether c is running and not unhealthy, or done with exit code 0
-// (init containers).
-// Status is docker's text, e.g. "Up 2 hours (healthy)" or "Exited (0) 3 hours ago".
+// (init containers). Status is docker's text, e.g. "Up 2 hours (healthy)" or
+// "Exited (0) 3 hours ago".
 func (c Container) OK() bool {
 	switch c.State {
 	case "running":
@@ -82,39 +85,47 @@ func (c Container) OK() bool {
 	case "exited":
 		return strings.HasPrefix(c.Status, "Exited (0)")
 	}
+
 	return false
 }
 
 // Bad returns the containers that aren't OK.
 func (s Stack) Bad() []Container {
 	var out []Container
+
 	for _, c := range s.Containers {
 		if !c.OK() {
 			out = append(out, c)
 		}
 	}
+
 	return out
 }
 
-// Problems lists what's wrong: the probe error, failed commands, failed units,
-// containers not OK.
+// Problems lists what's wrong: the host is down, or failed commands, failed
+// units, containers not OK.
 func (r Report) Problems() []string {
 	if r.Err != nil {
-		return []string{r.Err.Error()}
+		return []string{"down: " + r.Err.Error()}
 	}
+
 	out := slices.Clone(r.Errors)
+
 	if failed := r.Failed(); len(failed) > 0 {
 		var names []string
 		for _, u := range failed {
 			names = append(names, u.Name)
 		}
+
 		out = append(out, "failed: "+strings.Join(names, ", "))
 	}
+
 	for _, s := range r.Stacks {
 		for _, c := range s.Bad() {
 			out = append(out, "stack "+s.Name+": "+c.Name+" "+c.State+" ("+c.Status+")")
 		}
 	}
+
 	return out
 }
 
@@ -128,6 +139,7 @@ func clean(s string) string {
 		if r == '\t' || r == '\n' || !unicode.IsControl(r) {
 			return r
 		}
+
 		return -1
 	}, s)
 }

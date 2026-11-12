@@ -26,13 +26,8 @@ func PrintStatus(w io.Writer, reports []swarm.Report) bool {
 
 		fmt.Fprintln(tw, strings.Join(cells, "\t"))
 
-		sep := " "
-		if r.Err != nil {
-			sep = ": "
-		}
-
 		for _, p := range r.Problems() {
-			details = append(details, r.Host.Name+sep+p)
+			details = append(details, r.Host.Name+" "+p)
 		}
 	}
 

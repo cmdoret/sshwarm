@@ -19,7 +19,7 @@ func TestTones(t *testing.T) {
 	if m.tone != inherit {
 		t.Errorf("degraded machine row tone = %v", m.tone)
 	}
-	for i, want := range map[int]tone{1: warn, 2: warn, 6: warn, 7: bad, 8: bad, 3: inherit} {
+	for i, want := range map[int]tone{1: warn, 2: warn, 5: warn, 6: bad, 7: bad, 3: inherit} {
 		if m.cells[i].tone != want {
 			t.Errorf("machine cell %d %q: tone %v, want %v", i, m.cells[i].text, m.cells[i].tone, want)
 		}
@@ -71,12 +71,11 @@ func TestGridRender(t *testing.T) {
 
 	r := fixture(t)
 	g := newGrid(machineTitles...)
-	g.widths = []int{18, 10, 13, 8, 4, 6, 6, 6, 6, 30}
-	g.height = 6
-	g.SetRows([]row{machineRow(r), machineRow(swarm.Report{Host: swarm.Host{Name: "garage-node-neatus"}, Err: errTest})})
-	g.Update(tea.KeyMsg{Type: tea.KeyDown})
+	g.width, g.height = 120, 6
+	g.setRows([]row{machineRow(r), machineRow(swarm.Report{Host: swarm.Host{Name: "garage-node-neatus"}, Err: errTest})})
+	g.key(tea.KeyMsg{Type: tea.KeyDown})
 
-	v := g.View()
+	v := g.view()
 	if !strings.Contains(v, "\x1b[31m") || !strings.Contains(v, "\x1b[33m") || !strings.Contains(v, "\x1b[7") {
 		t.Errorf("expected red, yellow and the reversed selection in:\n%q", v)
 	}
