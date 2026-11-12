@@ -1,5 +1,5 @@
 {
-  description = "sshwarm: the state of a swarm of NixOS machines, over ssh";
+  description = "sshwarm: the state of a swarm of Linux machines, over ssh";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
@@ -20,7 +20,7 @@
           version = "0.1.0";
           src = self;
           # After changing Go dependencies: nix build prints the new hash.
-          vendorHash = "sha256-P3iFBhlDRS+bTfGRwy2bTPmi83HgIOMPKI364SRUouI=";
+          vendorHash = "sha256-OAWTxe4SpQsQLJpz6y1QAiJq2hvNkwjAHP2Dj99z8qI=";
           meta.mainProgram = "sshwarm";
         };
       });
