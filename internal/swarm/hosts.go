@@ -15,6 +15,49 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// Select keeps the hosts whose name contains one of names.
+// If no names are given, all hosts are selected.
+func Select(hosts []Host, names []string) []Host {
+	if len(names) == 0 {
+		return hosts
+	}
+
+	var out []Host
+
+	for _, h := range hosts {
+		if slices.ContainsFunc(names, func(n string) bool { return strings.Contains(h.Name, n) }) {
+			out = append(out, h)
+		}
+	}
+
+	return out
+}
+
+// Find is the index of the one host name means: the host with that exact name, or
+// the only one whose name contains it. Multiple matches result in error.
+func Find(hosts []Host, name string) (int, error) {
+	if i := slices.IndexFunc(hosts, func(h Host) bool { return h.Name == name }); i >= 0 {
+		return i, nil
+	}
+
+	var found []int
+
+	for i, h := range hosts {
+		if strings.Contains(h.Name, name) {
+			found = append(found, i)
+		}
+	}
+
+	switch len(found) {
+	case 0:
+		return -1, fmt.Errorf("no machine matches %q", name)
+	case 1:
+		return found[0], nil
+	}
+
+	return -1, fmt.Errorf("%q matches %d machines", name, len(found))
+}
+
 // LoadFlake reads deploy.nodes from the flake in flakeDir, with deploy-rs's
 // defaults for sshUser and sshOpts.
 func LoadFlake(ctx context.Context, flakeDir string) ([]Host, error) {

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Host is a machine sshwarm watches: its name, and how to reach it over ssh.
@@ -132,8 +134,8 @@ func (r Report) Problems() []string {
 // Age is the time since t, on the host's clock.
 func (r Report) Age(t time.Time) time.Duration { return r.Now.Sub(t) }
 
-// clean drops control characters from remote text, except tabs and newlines, so
-// it can't send escape sequences (clipboard, title, links) to the terminal.
+// clean makes remote text plain: it drops escape sequences, then any other
+// control character but tabs and newlines.
 func clean(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r == '\t' || r == '\n' || !unicode.IsControl(r) {
@@ -141,7 +143,7 @@ func clean(s string) string {
 		}
 
 		return -1
-	}, s)
+	}, ansi.Strip(s))
 }
 
 // oneLine flattens remote text for an error message or a table cell.

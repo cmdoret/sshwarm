@@ -12,9 +12,16 @@ import (
 	"time"
 )
 
-// docker runs docker on a machine, as root without a password prompt. Every
-// docker command sshwarm runs starts with it, the probe's included.
-const docker = "sudo -n docker"
+const (
+	// docker commands sshwarm runs starts with it, the probe's included.
+	docker = "sudo -n docker"
+
+	// logTail is the history a logs view opens with.
+	logTail = 300
+
+	// oneShotTimeout stops a log command running on the host after a number of seconds.
+	oneShotTimeout = 30
+)
 
 // sshCmd runs remote on h. It never prompts, and gives up on dead hosts and dead
 // connections quickly. tty gives the remote command a terminal, so that it's hung
@@ -39,31 +46,39 @@ func sshCmd(ctx context.Context, h Host, tty bool, remote string) *exec.Cmd {
 	return cmd
 }
 
-// UnitLogs and StackLogs are the remote commands behind the logs view, run with LogCmd.
+// UnitLogs is the log command of a systemd unit, for Logs.
 func UnitLogs(unit string) string {
-	return "journalctl -u " + quote(unit) + " -n 300 -o short-iso --no-pager"
+	return fmt.Sprintf("journalctl -u %s -n %d -o short-iso --no-pager", quote(unit), logTail)
 }
 
+// StackLogs is the log command of a compose stack, all its containers, for Logs.
 func StackLogs(stack string) string {
-	return docker + " compose -p " + quote(stack) + " logs --tail 300 --no-color"
+	return fmt.Sprintf("%s compose -p %s logs --tail %d --no-color", docker, quote(stack), logTail)
 }
 
-// LogCmd adds -f to follow; otherwise the command stops on its own on the host.
-// When following, the terminal hangs it up when we leave.
-func LogCmd(cmd string, follow bool) string {
+// ContainerLogs is the log command of one container, for Logs.
+func ContainerLogs(container string) string {
+	return fmt.Sprintf("%s logs --tail %d %s", docker, logTail, quote(container))
+}
+
+// Logs runs a log command on h and sends its lines: the last ones, or with follow,
+// those that come next too. A followed command gets a terminal, so that ending ssh
+// hangs it up; any other stops on the host after oneShotTimeout. The channel closes
+// when the command ends or ctx is cancelled.
+func Logs(ctx context.Context, h Host, cmd string, follow bool) <-chan string {
 	if follow {
-		return cmd + " -f"
+		return streamLines(ctx, h, true, cmd+" -f")
 	}
 
-	return "timeout 30 " + cmd
+	return streamLines(ctx, h, false, fmt.Sprintf("timeout %d %s", oneShotTimeout, cmd))
 }
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// StreamLines runs remote on h and sends its output, stdout and stderr, line by line,
+// streamLines runs remote on h and sends its output, stdout and stderr, line by line,
 // without control characters. The channel closes when the command ends or ctx is
 // cancelled. tty: see sshCmd.
-func StreamLines(ctx context.Context, h Host, remote string, tty bool) <-chan string {
+func streamLines(ctx context.Context, h Host, tty bool, remote string) <-chan string {
 	cmd := sshCmd(ctx, h, tty, remote)
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
