@@ -6,14 +6,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
+// maxLogLines is what a logs view keeps of a followed stream: far more than a
+// screen to scroll back through, in bounded memory.
 const maxLogLines = 5000
+
+// copyText puts text on the clipboard: with the local clipboard tool (wl-copy, xclip,
+// pbcopy...) when there is one, or else through the terminal (OSC 52), which works
+// over ssh but which some terminals garble, turning newlines into NULs. Tests
+// replace it.
+var copyText = func(text string) {
+	if err := clipboard.WriteAll(text); err != nil {
+		termenv.Copy(text)
+	}
+}
 
 // logLinesMsg brings a stream's next lines; ch tells which stream they come from.
 type logLinesMsg struct {
@@ -27,16 +41,20 @@ type logLinesMsg struct {
 type text struct {
 	title  string
 	host   swarm.Host
-	remote string // the command, without follow
-	follow bool
+	cmd    string // the log command, as swarm.Logs runs it
 	lines  []string
 	ch     <-chan string // the current stream, nil if none
 	cancel context.CancelFunc
-	pager  viewport.Model
+
+	follow, wrap, full bool // full: no title and help lines
+	pager              viewport.Model
 }
 
-func newText(title string, h swarm.Host, remote string) *text {
-	return &text{title: title, host: h, remote: remote, pager: viewport.New(0, 0)}
+func newText(title string, h swarm.Host, cmd string) *text {
+	t := &text{title: title, host: h, cmd: cmd, wrap: true, pager: viewport.New(0, 0)}
+	t.pager.SetHorizontalStep(8) // left and right, once lines don't wrap
+
+	return t
 }
 
 func (t *text) open(m *model) tea.Cmd { return t.start(m.ctx, false) }
@@ -47,7 +65,7 @@ func (t *text) start(ctx context.Context, follow bool) tea.Cmd {
 	ctx, t.cancel = context.WithCancel(ctx)
 	t.follow = follow
 	t.pager.SetContent("loading…")
-	t.ch = swarm.StreamLines(ctx, t.host, swarm.LogCmd(t.remote, follow), follow)
+	t.ch = swarm.Logs(ctx, t.host, t.cmd, follow)
 
 	return waitLog(t.ch)
 }
@@ -87,13 +105,25 @@ func (t *text) add(msg logLinesMsg) tea.Cmd {
 	return waitLog(t.ch)
 }
 
-// setContent wraps long lines to the window instead of cutting them off.
+// setContent wraps long lines to the window, unless wrapping is off: then left and
+// right scroll.
 func (t *text) setContent() {
-	t.pager.SetContent(lipgloss.NewStyle().Width(t.pager.Width).Render(strings.Join(t.lines, "\n")))
+	content := strings.Join(t.lines, "\n")
+	if t.wrap {
+		content = lipgloss.NewStyle().Width(t.pager.Width).Render(content)
+	}
+
+	t.pager.SetContent(content)
 }
 
+// resize gives the pager the window, but for the title and help lines unless
+// fullscreen.
 func (t *text) resize(width, height int) {
-	t.pager.Width, t.pager.Height = width, max(height-2, 1)
+	if !t.full {
+		height -= chrome
+	}
+
+	t.pager.Width, t.pager.Height = width, max(height, 1)
 	t.setContent()
 }
 
@@ -102,10 +132,18 @@ func (t *text) key(m *model, k tea.KeyMsg) tea.Cmd {
 
 	switch k.String() {
 	case "esc":
-		t.stop()
 		m.pop()
-	case "f":
+	case "s":
 		return t.start(m.ctx, !t.follow)
+	case "w":
+		t.wrap = !t.wrap
+		t.setContent()
+	case "f":
+		t.full = !t.full
+		t.resize(m.width, m.height)
+	case "c":
+		copyText(strings.Join(t.lines, "\n"))
+		m.flash = fmt.Sprintf("copied %d lines", len(t.lines))
 	case "g", "home":
 		t.pager.GotoTop()
 	case "G", "end":
@@ -117,15 +155,24 @@ func (t *text) key(m *model, k tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
-func (t *text) view(*model) string {
-	title := titleStyle.Render(t.title) + dimStyle.Render(fmt.Sprintf(" · %3.f%%", t.pager.ScrollPercent()*100))
+func (t *text) view(m *model) string {
+	if t.full { // the command bar or a message still shows, on the last line
+		lines := strings.Split(t.pager.View(), "\n")
+		if bar := m.bar(); bar != "" {
+			lines[len(lines)-1] = bar
+		}
 
-	follow := "f follow"
-	if t.follow {
-		follow = "f stop following"
+		return strings.Join(lines, "\n")
 	}
 
-	return frame(title, t.pager.View(), follow+" · g/G top/bottom · esc back · q quit")
+	title := titleStyle.Render(t.title) + dimStyle.Render(fmt.Sprintf(" · %3.f%%", t.pager.ScrollPercent()*100))
+
+	follow := "s follow"
+	if t.follow {
+		follow = "s stop following"
+	}
+
+	return m.frame(title, t.pager.View(), follow+" · w wrap · f fullscreen · c copy · g/G top/bottom · esc back · q quit")
 }
 
 // waitLog delivers the next lines of a stream, gathered for up to 50 ms, so a
