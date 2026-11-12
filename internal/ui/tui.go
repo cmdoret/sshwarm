@@ -82,7 +82,7 @@ func newModel(ctx context.Context, hosts []swarm.Host, timeout, interval time.Du
 
 	return model{
 		ctx: ctx, hosts: hosts, timeout: timeout, interval: interval, refreshing: true,
-		spin:    spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(keyStyle)),
+		spin:    spinner.New(spinner.WithSpinner(spinner.Meter), spinner.WithStyle(keyStyle)),
 		screens: []screen{newTable(machines, -1, "")}, command: c,
 	}
 }
@@ -313,8 +313,10 @@ func (m model) machine(name string) (int, error) {
 
 // View shows the top screen, every line cut to the window's width.
 func (m model) View() string {
-	if m.reports == nil {
-		return fmt.Sprintf("%s probing %d machines…\n", m.spin.View(), len(m.hosts))
+	if m.reports == nil { // in the middle of the window, where the table will be
+		probing := fmt.Sprintf("%s probing %d machines…", m.spin.View(), len(m.hosts))
+
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, probing)
 	}
 
 	lines := strings.Split(m.top().view(&m), "\n")
