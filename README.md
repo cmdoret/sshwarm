@@ -46,11 +46,15 @@ sshwarm --flake ./nix status web   # the table, for the machines whose name cont
 ```toml
 # hosts.toml: one [[host]] per machine
 [[host]]
+name = "db"                  # ssh db: user, key, port... from "Host db" in ~/.ssh/config
+
+[[host]]
 name = "web-1"
-host = "web-1.example.org"   # optional, and so are user and key; host defaults to the name
+host = "web-1.example.org"   # ssh -i ~/.ssh/web deploy@web-1.example.org
 user = "deploy"
 key  = "~/.ssh/web"
 ```
 
-Anything else ssh needs, like ports or jump hosts, comes from `~/.ssh/config`. Set
-`SSHWARM_HOSTS` or `SSHWARM_FLAKE` to skip the flag. The rest: `sshwarm help`.
+Only `name` is required. ssh looks up `host`, or else `name`, in `~/.ssh/config` for
+anything not set in the file, like ports or jump hosts. Set `SSHWARM_HOSTS` or
+`SSHWARM_FLAKE` to skip the flag. The rest: `sshwarm help`.

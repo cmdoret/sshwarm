@@ -206,16 +206,25 @@ func usage() {
   probe <machine>       print a machine's raw probe output (debugging, test fixtures)
   help                  print this message
 
-The machines come from a hosts file, or else from a flake's deploy.nodes. A hosts
-file has a [[host]] table per machine: its name, and optionally host (the name by
-default), user and key; the rest comes from ~/.ssh/config. A machine is named by
-any part of its name: web-1, or web for all web machines.
+Machine can be referenced by substrings of their name.
 
 Flags, before the command:
 
-  --hosts <file>         the TOML hosts file (default: $SSHWARM_HOSTS)
-  --flake <dir>          the flake defining deploy.nodes (default: $SSHWARM_FLAKE, or .)
+  --hosts <file>         the TOML hosts file, see below (default: $SSHWARM_HOSTS)
+  --flake <dir>          without --hosts, the flake defining deploy.nodes (default: $SSHWARM_FLAKE, or .)
   --timeout <duration>   probe timeout, per machine (default: %v)
   --refresh <duration>   how often the browser refreshes (default: %v)
+
+Hosts file, one [[host]] per machine. ssh looks up its host, or else its name, in
+~/.ssh/config for anything not set here:
+
+  [[host]]
+  name = "db"                  # ssh db
+
+  [[host]]
+  name = "web-1"
+  host = "web-1.example.org"   # ssh -i ~/.ssh/web deploy@web-1.example.org
+  user = "deploy"
+  key  = "~/.ssh/web"
 `, defaultTimeout, defaultRefresh)
 }

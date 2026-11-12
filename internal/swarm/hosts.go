@@ -68,7 +68,8 @@ func LoadFlake(ctx context.Context, flakeDir string) ([]Host, error) {
 
 // LoadFile reads a TOML hosts file: a [[host]] table per machine, with its name,
 // and optionally the host to reach (the name by default), the ssh user and key.
-// Anything else ssh needs comes from ~/.ssh/config. The hosts keep the file's order.
+// ssh looks up that host in ~/.ssh/config for anything else. The hosts keep the
+// file's order.
 func LoadFile(path string) ([]Host, error) {
 	var file struct {
 		Host []struct{ Name, Host, User, Key string }
