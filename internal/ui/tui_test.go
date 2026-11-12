@@ -260,8 +260,8 @@ func TestNavigation(t *testing.T) {
 	s.expect("1 machines", "enter open")
 }
 
-// d describes a unit, a stack or a container, and s opens a shell on a machine or
-// in a container.
+// d describes a machine, a unit, a stack or a container, and s opens a shell on a
+// machine or in a container.
 func TestActions(t *testing.T) {
 	r := fixture(t)
 	fakeBin(t, "ssh", `eval remote=\${$#}; echo "ran: $remote"`)
@@ -284,6 +284,11 @@ func TestActions(t *testing.T) {
 	if n := len(shell); n < 2 || shell[n-2] != "--" || shell[n-1] != "argiope" || !slices.Contains(shell, "-tt") {
 		t.Errorf("machine shell: %q", shell)
 	}
+
+	// d on a machine: what it is, its CPUs and what uses them, memory, disks.
+	s.logs("d")
+	s.expect("app-node-argiope · describe", "hostnamectl", "lscpu", "top -b -n 2", "df -h")
+	s.keys("esc")
 
 	// d on the failed unit: its status, nothing to follow.
 	s.keys("enter")

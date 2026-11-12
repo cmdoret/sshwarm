@@ -137,7 +137,12 @@ func (t *table) show(m *model, command func(swarm.Report, string) (string, strin
 		return nil
 	}
 
-	r := m.reports[t.host]
+	host := t.host
+	if t.kind == machines {
+		host = machineNamed(m, key) // the row is the machine
+	}
+
+	r := m.reports[host]
 	title, cmd := command(r, key)
 
 	return m.push(newText(r.Host.Name+" · "+title, r.Host, cmd, canFollow))

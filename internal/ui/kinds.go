@@ -54,7 +54,7 @@ func tabsOf(r swarm.Report) []*kind {
 // machines is the bottom table; a machine's own kinds are its tabs (tabsOf).
 var machines = &kind{
 	names:  []string{"machines"},
-	help:   "enter open · s ssh",
+	help:   "enter open · d describe · s ssh",
 	titles: machineTitles,
 	rows: func(m *model, _ int, _ string) []row {
 		var rows []row
@@ -70,6 +70,7 @@ var machines = &kind{
 	shell: func(m *model, _ int, name string) tea.Cmd {
 		return m.shell(m.reports[machineNamed(m, name)].Host, "")
 	},
+	describe: func(swarm.Report, string) (string, string) { return "describe", swarm.DescribeMachine() },
 }
 
 // machineNamed is the index of the machine with that name in m.reports.
