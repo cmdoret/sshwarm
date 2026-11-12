@@ -32,9 +32,9 @@ nix run github:cmdoret/sshwarm -- --hosts hosts.toml
 - `ssh`, and the machines listed in a TOML hosts file, or in a flake's `deploy.nodes`
   as for [deploy-rs](https://github.com/serokell/deploy-rs) (then also `nix`).
 - Linux machines with systemd and bash, reachable over ssh without a password prompt
-  (keys or agent), with:
+  (keys or agent), where:
     - ssh user in the `systemd-journal` group.
-    - passwordless `sudo docker`.
+    - ssh user can run docker without password (either rootless or with sudo).
 
 ## Use
 
