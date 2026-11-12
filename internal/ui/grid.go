@@ -1,17 +1,11 @@
 package ui
 
 import (
-	"fmt"
-	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
-
-	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
 // tone colors a row, or one cell when it alone needs attention (like k9s).
@@ -49,10 +43,11 @@ func (c cell) shown() string {
 
 func dot(t tone, text string) cell { return cell{text, t, true} }
 
+// row is one line of a grid: a cell per column.
 type row struct {
 	cells []cell
 	tone  tone
-	key   string // what the row is about: a machine, unit or stack name
+	key   string // what the row is about: a machine, unit, stack or container name
 }
 
 // grid is a scrolling table with one selected row. Unlike bubbles/table, it colors
@@ -63,8 +58,6 @@ type grid struct {
 	cursor, offset int
 	width, height  int // the space it has, header included
 }
-
-func newGrid(titles ...string) grid { return grid{titles: titles} }
 
 func (g *grid) setRows(rows []row) {
 	g.rows = rows
@@ -157,17 +150,14 @@ func (g grid) view() string {
 	return b.String()
 }
 
+// renderRow draws row i, a cell per column: in the cell's tone, or else the row's.
+// The selected row is one bar in the row's tone.
 func (g grid) renderRow(i int, widths []int) string {
 	r := g.rows[i]
 
 	var out strings.Builder
 
-	for j, w := range widths {
-		c := cell{}
-		if j < len(r.cells) {
-			c = r.cells[j]
-		}
-
+	for j, c := range r.cells {
 		t := c.tone
 		if t == inherit {
 			t = r.tone
@@ -175,10 +165,10 @@ func (g grid) renderRow(i int, widths []int) string {
 
 		st := toneStyles[t] // inherit: the zero style, plain
 		if i == g.cursor {
-			st = toneStyles[r.tone].Reverse(true) // one bar, in the row's color
+			st = toneStyles[r.tone].Reverse(true)
 		}
 
-		out.WriteString(st.Render(pad(c.shown(), w)))
+		out.WriteString(st.Render(pad(c.shown(), widths[j])))
 	}
 
 	return out.String()
@@ -187,161 +177,4 @@ func (g grid) renderRow(i int, widths []int) string {
 // pad fits s in a column w wide, with a space either side.
 func pad(s string, w int) string {
 	return " " + runewidth.FillRight(runewidth.Truncate(s, w, "…"), w) + " "
-}
-
-// --- rows -------------------------------------------------------------------
-
-// machineTitles head the machines table: `sshwarm status` prints all but PROBLEMS.
-var machineTitles = []string{"MACHINE", "STATE", "REV", "DEPLOYED", "UPTIME", "REBOOT", "FAILED", "STACKS", "PROBLEMS"}
-
-// machineRow is a machine's row, for both the TUI and `sshwarm status`. Only the
-// fields needing attention are colored, unless the machine is down.
-func machineRow(r swarm.Report) row {
-	if r.Err != nil {
-		cells := slices.Repeat([]cell{{text: "-"}}, len(machineTitles))
-		cells[0], cells[1], cells[len(cells)-1] = cell{text: r.Host.Name}, dot(bad, "down"), cell{text: r.Err.Error()}
-
-		return row{tone: bad, key: r.Host.Name, cells: cells}
-	}
-
-	problems := r.Problems()
-
-	state := dot(good, "ok")
-	if len(problems) > 0 {
-		state = dot(warn, "degraded")
-	}
-
-	rev := cell{text: shortRev(r.Revision)}
-
-	switch {
-	case r.Revision == "":
-		rev.tone = dim
-	case strings.HasSuffix(r.Revision, "-dirty"):
-		rev.tone = warn
-	}
-
-	deployed := cell{text: "-"}
-	if !r.Deployed.IsZero() {
-		deployed.text = short(r.Age(r.Deployed))
-	}
-
-	reboot := cell{text: "no"}
-	if r.RebootPending {
-		reboot = cell{text: "yes", tone: warn}
-	}
-
-	nFailed := len(r.Failed())
-
-	failed := cell{text: strconv.Itoa(nFailed)}
-	if nFailed > 0 {
-		failed.tone = bad
-	}
-
-	stacks := cell{text: "-"}
-	if r.HasDocker {
-		up := r.StacksUp()
-
-		stacks.text = fmt.Sprintf("%d/%d", up, len(r.Stacks))
-		if up < len(r.Stacks) {
-			stacks.tone = bad
-		}
-	}
-
-	return row{key: r.Host.Name, cells: []cell{
-		{text: r.Host.Name}, state, rev, deployed, {text: short(r.Uptime)}, reboot, failed, stacks,
-		{text: strings.Join(problems, "; "), tone: bad},
-	}}
-}
-
-func unitRow(r swarm.Report, u swarm.Unit) row {
-	age := "-"
-	if !u.Since.IsZero() {
-		age = short(r.Age(u.Since))
-	}
-
-	result := cell{text: u.Result}
-	if u.Result != "" && u.Result != "success" {
-		result.tone = bad
-	}
-
-	cells := func(state tone) []cell {
-		return []cell{dot(state, u.Name), {text: u.Active, tone: state}, {text: u.Sub}, result, {text: age}, {text: u.Description}}
-	}
-
-	switch u.Active {
-	case "failed":
-		return row{tone: bad, cells: cells(bad), key: u.Name}
-	case "activating", "deactivating", "reloading", "refreshing":
-		return row{cells: cells(warn), key: u.Name}
-	case "active":
-		return row{cells: cells(good), key: u.Name}
-	}
-
-	return row{tone: dim, cells: cells(dim), key: u.Name} // inactive: there, but nothing to see
-}
-
-// containerTone rates c: restarting is a crash loop, so bad; starting is fine for now.
-func containerTone(c swarm.Container) tone {
-	switch {
-	case !c.OK():
-		return bad
-	case strings.Contains(c.Status, "health: starting"), c.State == "created", c.State == "paused":
-		return warn
-	}
-
-	return good
-}
-
-func stackRow(s swarm.Stack) row {
-	worst := good
-
-	var problems []string
-
-	for _, c := range s.Containers {
-		t := containerTone(c)
-		worst = max(worst, t)
-
-		if t != good {
-			problems = append(problems, c.Name+" "+c.Status)
-		}
-	}
-
-	ok := fmt.Sprintf("%d/%d", len(s.Containers)-len(s.Bad()), len(s.Containers))
-	r := row{key: s.Name, cells: []cell{dot(worst, s.Name), {text: ok, tone: worst}, {text: strings.Join(problems, "; ")}}}
-
-	if worst == bad {
-		r.tone = bad
-	}
-
-	return r
-}
-
-// short formats a duration as its largest unit: 45s, 12m, 5h, 3d.
-func short(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return strconv.Itoa(int(d.Seconds())) + "s"
-	case d < time.Hour:
-		return strconv.Itoa(int(d.Minutes())) + "m"
-	case d < 48*time.Hour:
-		return strconv.Itoa(int(d.Hours())) + "h"
-	}
-
-	return strconv.Itoa(int(d.Hours()/24)) + "d"
-}
-
-// shortRev keeps 7 characters of a commit, and its -dirty suffix.
-func shortRev(rev string) string {
-	if rev == "" {
-		return "-"
-	}
-
-	rev, dirty := strings.CutSuffix(rev, "-dirty")
-	rev = rev[:min(len(rev), 7)]
-
-	if dirty {
-		rev += "-dirty"
-	}
-
-	return rev
 }

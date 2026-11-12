@@ -70,7 +70,7 @@ func TestGridRender(t *testing.T) {
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	r := fixture(t)
-	g := newGrid(machineTitles...)
+	g := grid{titles: machineTitles}
 	g.width, g.height = 120, 6
 	g.setRows([]row{machineRow(r), machineRow(swarm.Report{Host: swarm.Host{Name: "garage-node-neatus"}, Err: errTest})})
 	g.key(tea.KeyMsg{Type: tea.KeyDown})
