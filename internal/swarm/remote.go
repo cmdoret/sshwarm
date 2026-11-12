@@ -65,7 +65,46 @@ func ContainerLogs(docker, container string) string {
 	return fmt.Sprintf("%s logs --tail %d %s", docker, logTail, quote(container))
 }
 
-// Logs runs a log command on h and sends its lines: the last ones, or with follow,
+// DescribeUnit is the describe command of a systemd unit, for Stream: its state and
+// last lines. systemctl's exit code is the unit's state (3: not running), not an error.
+func DescribeUnit(unit string) string {
+	return fmt.Sprintf("systemctl status --no-pager %s || true", quote(unit))
+}
+
+// DescribeStack is the describe command of a compose stack, for Stream: its
+// containers, and the resources the running ones use. docker: see StackLogs.
+func DescribeStack(docker, stack string) string {
+	project := docker + " compose -p " + quote(stack)
+
+	return inSequence(project+" ps -a", project+" stats --no-stream")
+}
+
+// DescribeContainer is the describe command of a container, for Stream: the
+// resources it uses, then everything docker knows about it. docker: see StackLogs.
+func DescribeContainer(docker, container string) string {
+	return inSequence(docker+" stats --no-stream "+quote(container), docker+" inspect "+quote(container))
+}
+
+// ContainerShell is the command that opens a shell in a container, for Interactive:
+// bash if the image has it, else sh. docker: see StackLogs.
+func ContainerShell(docker, container string) string {
+	return fmt.Sprintf("%s exec -it %s sh -c %s", docker, quote(container),
+		quote("command -v bash >/dev/null && exec bash || exec sh"))
+}
+
+// inSequence runs commands one after the other, in one shell, so that Stream's
+// timeout covers them all. A blank line separates their outputs.
+func inSequence(cmds ...string) string {
+	return "sh -c " + quote(strings.Join(cmds, "; echo; "))
+}
+
+// Interactive is ssh running remote on h with the user's terminal, or with remote
+// "", a login shell. The caller hands it the terminal.
+func Interactive(ctx context.Context, h Host, remote string) *exec.Cmd {
+	return sshCmd(ctx, h, true, remote)
+}
+
+// Stream runs cmd on h and sends its output lines: the last ones, or with follow,
 // those that come next too. A followed command gets a terminal, so that ending ssh
 // hangs it up; any other stops on the host after oneShotTimeout. The channel closes
 // when the command ends or ctx is cancelled.
