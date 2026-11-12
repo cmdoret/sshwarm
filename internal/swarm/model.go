@@ -29,7 +29,7 @@ type Report struct {
 	RebootPending bool
 	Revision      string // NixOS: the git commit the system was built from, if set
 	Units         []Unit
-	HasDocker     bool
+	Docker        string // the command that reaches docker there, e.g. "sudo -n docker"; "" without docker
 	Stacks        []Stack
 }
 

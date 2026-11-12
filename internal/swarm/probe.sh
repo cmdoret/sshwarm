@@ -1,10 +1,9 @@
 # Read-only probe that `sshwarm` pipes to each machine:
-#   ssh <host> timeout <s> bash -s -- '<docker command>'   e.g. 'sudo -n docker'
+#   ssh <host> timeout <s> bash -s
 # Prints sections: a "### <name>" line, then that command's output.
 # A command that fails prints "### error <name>" and its message instead.
 # Any Linux with systemd: the NixOS-only lines first check for what they read.
 export LC_ALL=C
-docker_cmd=$1 # words, split on purpose below
 
 section() {
   name=$1
@@ -33,6 +32,18 @@ reboot_pending() {
   [ -n "$(ls /lib/modules 2>/dev/null)" ] && [ ! -d "/lib/modules/$(uname -r)" ]
 }
 
+# docker_cmd prints the first command that reaches docker (rootless or rootful).
+docker_cmd() {
+  command -v docker >/dev/null || return
+  for d in docker "docker -H unix:///run/user/$(id -u)/docker.sock" "sudo -n docker"; do
+    if $d ps -q >/dev/null 2>&1; then
+      echo "$d"
+      return
+    fi
+  done
+  echo "sudo -n docker" # none works: the containers section shows its error
+}
+
 echo "### meta"
 echo "os=$(. /etc/os-release && echo "$PRETTY_NAME")"
 echo "now=$(date +%s)"
@@ -44,13 +55,12 @@ if rev=$(nixos-version --configuration-revision 2>/dev/null); then # NixOS, when
   echo "revision=$rev"
 fi
 echo "reboot=$(reboot_pending && echo true || echo false)"
-docker=false
-command -v docker >/dev/null && docker=true
+docker=$(docker_cmd)
 echo "docker=$docker"
 
 section units systemctl show --timestamp=unix --no-pager \
   -p Id,ActiveState,SubState,Description,Result,UnitFileState,StateChangeTimestamp '*.service'
-if [ "$docker" = true ]; then
-  section containers $docker_cmd ps -a --filter label=com.docker.compose.project \
+if [ -n "$docker" ]; then
+  section containers $docker ps -a --filter label=com.docker.compose.project \
     --format '{{.Label "com.docker.compose.project"}}\t{{.Names}}\t{{.State}}\t{{.Status}}'
 fi

@@ -1,9 +1,12 @@
 package swarm
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -40,7 +43,7 @@ func fakeBin(t *testing.T, name, script string) {
 
 func TestParse(t *testing.T) {
 	r := fixture(t)
-	if r.OS != "NixOS 26.05 (Yarara)" || !r.RebootPending || !r.HasDocker || len(r.Errors) != 0 {
+	if r.OS != "NixOS 26.05 (Yarara)" || !r.RebootPending || r.Docker != "sudo -n docker" || len(r.Errors) != 0 {
 		t.Errorf("meta: %+v", r)
 	}
 
@@ -82,7 +85,7 @@ func TestParseNotNixOS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if r.OS != "Debian GNU/Linux 12 (bookworm)" || !r.RebootPending || r.HasDocker || len(r.Units) != 2 {
+	if r.OS != "Debian GNU/Linux 12 (bookworm)" || !r.RebootPending || r.Docker != "" || len(r.Units) != 2 {
 		t.Errorf("%+v", r)
 	}
 
@@ -93,7 +96,7 @@ func TestParseNotNixOS(t *testing.T) {
 
 // A command that fails on the host is a problem, not a silent gap.
 func TestProbeErrors(t *testing.T) {
-	out := "### meta\nnow=1\ndocker=true\n" +
+	out := "### meta\nnow=1\ndocker=sudo -n docker\n" +
 		"### error containers\nCannot connect to the Docker daemon\n" +
 		"### error units\nFailed to connect\n  to bus\n"
 
@@ -102,7 +105,7 @@ func TestProbeErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !r.HasDocker {
+	if r.Docker == "" {
 		t.Error("docker that fails must still count as present")
 	}
 
@@ -113,6 +116,40 @@ func TestProbeErrors(t *testing.T) {
 
 	if _, err := Parse("nothing ran"); err == nil {
 		t.Error("output without a meta section must be an error")
+	}
+}
+
+// TestDockerCmd runs the probe here, against a fake docker that answers one way only:
+// the probe must find that way, and keep sudo's error when there's none.
+func TestDockerCmd(t *testing.T) {
+	fakeBin(t, "sudo", `shift; SUDO=1 exec "$@"`) // sudo -n docker …: docker, as root
+
+	tests := []struct{ answers, want string }{
+		{`exit 0`, "docker"},
+		{`[ "$1" = -H ]`, fmt.Sprintf("docker -H unix:///run/user/%d/docker.sock", os.Getuid())},
+		{`[ -n "$SUDO" ]`, "sudo -n docker"},
+		{`exit 1`, "sudo -n docker"},
+	}
+
+	for _, tt := range tests {
+		fakeBin(t, "docker", tt.answers)
+
+		cmd := exec.CommandContext(t.Context(), "bash", "-s")
+		cmd.Stdin = strings.NewReader(probeScript)
+
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r, err := Parse(string(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if r.Docker != tt.want {
+			t.Errorf("docker answering %s: got %q, want %q", tt.answers, r.Docker, tt.want)
+		}
 	}
 }
 
@@ -135,7 +172,7 @@ func TestProbeAll(t *testing.T) {
 	// Like real ssh: destination right after --, then the remote command.
 	fakeBin(t, "ssh", `
 while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done
-case "$3" in "timeout "*" bash -s -- 'sudo -n docker'") ;; *) echo "ssh: bad destination or command: $2 $3" >&2; exit 255 ;; esac
+case "$3" in "timeout "*" bash -s") ;; *) echo "ssh: bad destination or command: $2 $3" >&2; exit 255 ;; esac
 cat >/dev/null
 case "$2" in
   slow) sleep 5 ;;
