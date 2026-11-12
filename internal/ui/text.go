@@ -140,7 +140,7 @@ func waitLog(ch <-chan string) tea.Cmd {
 		lines := []string{line}
 		batch := time.After(50 * time.Millisecond)
 
-		for len(lines) < 1000 {
+		for {
 			select {
 			case l, ok := <-ch:
 				if !ok {
@@ -152,7 +152,5 @@ func waitLog(ch <-chan string) tea.Cmd {
 				return logLinesMsg{ch: ch, lines: lines}
 			}
 		}
-
-		return logLinesMsg{ch: ch, lines: lines}
 	}
 }

@@ -12,14 +12,17 @@ import (
 // table is a screen listing the rows of one kind: the machines, or a machine's
 // services or stacks.
 type table struct {
-	kind  *kind
-	host  int    // index in the reports; -1 for the machines
-	query string // the filter, on the rows' keys
-	grid  grid
+	kind   *kind
+	host   int             // index in the reports; -1 for the machines
+	filter textinput.Model // on the rows' keys
+	grid   grid
 }
 
 func newTable(k *kind, host int) *table {
-	return &table{kind: k, host: host, grid: newGrid(k.titles...)}
+	f := textinput.New()
+	f.Prompt = "/"
+
+	return &table{kind: k, host: host, filter: f, grid: newGrid(k.titles...)}
 }
 
 func (t *table) open(m *model) tea.Cmd {
@@ -30,7 +33,7 @@ func (t *table) open(m *model) tea.Cmd {
 
 // refresh rebuilds the rows from the reports.
 func (t *table) refresh(m *model) {
-	t.grid.SetRows(matching(t.kind.rows(m, t.host), t.query))
+	t.grid.setRows(matching(t.kind.rows(m, t.host), t.filter.Value()))
 }
 
 // matching keeps the rows whose key contains query, ignoring case.
@@ -41,27 +44,20 @@ func matching(rows []row, query string) []row {
 }
 
 func (t *table) resize(width, height int) {
-	around := 2 // the title and help lines
+	chrome := 2 // the title and help lines that view draws
 	if t.host >= 0 {
-		around = 3 // and the tabs
+		chrome = 3 // and the tabs
 	}
 
-	g := &t.grid
-	copy(g.widths, t.kind.widths(width))
-
-	last := len(g.widths) - 1
-	rest := width - 2 // the last column's padding
-
-	for _, w := range g.widths[:last] {
-		rest -= w + 2
-	}
-
-	g.widths[last] = max(rest, 10)
-	g.height = max(height-around, 3)
-	g.clamp()
+	t.grid.width, t.grid.height = width, max(height-chrome, 3)
+	t.grid.clamp()
 }
 
 func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
+	if t.filter.Focused() {
+		return t.filterKey(m, k)
+	}
+
 	switch k.String() {
 	case "esc":
 		m.pop()
@@ -71,18 +67,35 @@ func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
 		m.all = !m.all
 		m.rows()
 	case "/":
-		m.filter.Focus()
-
-		return textinput.Blink
+		return t.filter.Focus()
 	case "enter":
 		if len(t.grid.rows) > 0 {
 			return t.kind.enter(m, t.host, t.grid.rows[t.grid.cursor].key)
 		}
 	default:
-		t.grid.Update(k)
+		t.grid.key(k)
 	}
 
 	return nil
+}
+
+// filterKey types into the filter: enter keeps it, esc clears it.
+func (t *table) filterKey(m *model, k tea.KeyMsg) tea.Cmd {
+	var cmd tea.Cmd
+
+	switch k.String() {
+	case "esc":
+		t.filter.SetValue("")
+		t.filter.Blur()
+	case "enter":
+		t.filter.Blur()
+	default:
+		t.filter, cmd = t.filter.Update(k)
+	}
+
+	t.refresh(m)
+
+	return cmd
 }
 
 // nextTab shows the machine's next kind, if it has more than one.
@@ -104,18 +117,18 @@ func (t *table) nextTab(m *model) {
 
 func (t *table) view(m *model) string {
 	filter := ""
-	if m.filter.Focused() || t.query != "" {
-		filter = "  " + m.filter.View()
+	if t.filter.Focused() || t.filter.Value() != "" {
+		filter = "  " + t.filter.View()
 	}
 
 	if t.host < 0 {
 		title := titleStyle.Render("sshwarm") + dimStyle.Render(fmt.Sprintf(" · %d machines · %s", len(m.reports), m.refreshStatus()))
 
-		return frame(title+filter, t.grid.View(), "enter open · / filter · r refresh · q quit")
+		return frame(title+filter, t.grid.view(), "enter open · / filter · r refresh · q quit")
 	}
 
 	r := m.reports[t.host]
-	title := titleStyle.Render(r.Host.Name) + dimStyle.Render(fmt.Sprintf(" · %s · up %s · gen %d · %s", r.Version, short(r.Uptime), r.Generation, m.refreshStatus()))
+	title := titleStyle.Render(r.Host.Name) + dimStyle.Render(fmt.Sprintf(" · %s · up %s · %s", r.Version, short(r.Uptime), m.refreshStatus()))
 
 	if r.Err != nil { // went down since we opened it
 		return frame(title, toneStyles[bad].Render("down: "+r.Err.Error()), "r refresh · esc back · q quit")
@@ -129,7 +142,7 @@ func (t *table) view(m *model) string {
 			style = onTabStyle
 		}
 
-		bar += style.Render(fmt.Sprintf("%s %d", k.name, len(matching(k.rows(m, t.host), t.query))))
+		bar += style.Render(fmt.Sprintf("%s %d", k.name, len(matching(k.rows(m, t.host), t.filter.Value()))))
 	}
 
 	scope := "a all units"
@@ -137,5 +150,5 @@ func (t *table) view(m *model) string {
 		scope = "a interesting units"
 	}
 
-	return frame(title, bar+filter+"\n"+t.grid.View(), "enter logs · tab switch · / filter · "+scope+" · r refresh · esc back · q quit")
+	return frame(title, bar+filter+"\n"+t.grid.view(), "enter logs · tab switch · / filter · "+scope+" · r refresh · esc back · q quit")
 }

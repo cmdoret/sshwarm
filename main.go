@@ -103,7 +103,7 @@ func statusCmd(opts options, args []string) error {
 		return err
 	}
 
-	if !ui.PrintStatus(os.Stdout, swarm.ProbeAll(ctx, hosts, opts.timeout, false)) {
+	if !ui.PrintStatus(os.Stdout, swarm.ProbeAll(ctx, hosts, opts.timeout)) {
 		return errReported
 	}
 
@@ -130,10 +130,7 @@ func probeCmd(opts options, args []string) error {
 		return fmt.Errorf("%q matches %d machines", fs.Arg(0), len(hosts))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opts.timeout)
-	defer cancel()
-
-	out, err := swarm.RunProbe(ctx, hosts[0], false)
+	out, err := swarm.RunProbe(context.Background(), hosts[0], opts.timeout)
 	if err != nil {
 		return err
 	}

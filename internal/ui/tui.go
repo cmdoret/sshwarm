@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -44,18 +43,14 @@ type model struct {
 	refreshed  time.Time
 	tickGen    int
 
-	all           bool            // services: show every unit, not only the interesting ones
-	filter        textinput.Model // edits the top table's filter
+	all           bool // services: show every unit, not only the interesting ones
 	width, height int
 	stack         []screen // the machines at the bottom; the top one is shown
 }
 
 func newModel(ctx context.Context, flake string, timeout, interval time.Duration) model {
-	f := textinput.New()
-	f.Prompt = "/"
-
 	return model{
-		ctx: ctx, flake: flake, timeout: timeout, interval: interval, filter: f,
+		ctx: ctx, flake: flake, timeout: timeout, interval: interval,
 		stack: []screen{newTable(machines, -1)},
 	}
 }
@@ -75,29 +70,23 @@ func (m *model) refresh() tea.Cmd {
 	m.refreshing = true
 	ctx, hosts, timeout := m.ctx, m.hosts, m.timeout
 
-	return func() tea.Msg { return reportsMsg(swarm.ProbeAll(ctx, hosts, timeout, true)) }
+	return func() tea.Msg { return reportsMsg(swarm.ProbeAll(ctx, hosts, timeout)) }
 }
 
 func (m model) top() screen { return m.stack[len(m.stack)-1] }
 
-// push shows s over the current screen, with an empty filter.
+// push shows s over the current screen.
 func (m *model) push(s screen) tea.Cmd {
 	s.resize(m.width, m.height)
 	m.stack = append(m.stack, s)
-	m.filter.SetValue("")
 
 	return s.open(m)
 }
 
-// pop goes back to the screen below, and its filter.
+// pop goes back to the screen below, if any.
 func (m *model) pop() {
-	if len(m.stack) == 1 {
-		return
-	}
-
-	m.stack = m.stack[:len(m.stack)-1]
-	if t, ok := m.top().(*table); ok {
-		m.filter.SetValue(t.query)
+	if len(m.stack) > 1 {
+		m.stack = m.stack[:len(m.stack)-1]
 	}
 }
 
@@ -148,44 +137,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// key handles the keys every screen shares, then hands over to the top screen.
+// key handles the keys every screen shares, unless a filter is being typed, then
+// hands over to the top screen.
 func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	t, ok := m.top().(*table)
+	typing := ok && t.filter.Focused()
+
 	s := k.String()
-	if s == "ctrl+c" || s == "q" && !m.filter.Focused() {
+	if s == "ctrl+c" || s == "q" && !typing {
 		return m, tea.Quit // Run's context then ends every stream
 	}
 
-	if m.filter.Focused() {
-		return m.filterKey(k)
-	}
-
-	if s == "r" {
+	if s == "r" && !typing {
 		return m, m.refresh()
 	}
 
 	return m, m.top().key(&m, k)
-}
-
-// filterKey types into the top table's filter: enter keeps it, esc clears it.
-func (m model) filterKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-
-	switch k.String() {
-	case "esc":
-		m.filter.SetValue("")
-		m.filter.Blur()
-	case "enter":
-		m.filter.Blur()
-	default:
-		m.filter, cmd = m.filter.Update(k)
-	}
-
-	if t, ok := m.top().(*table); ok {
-		t.query = m.filter.Value()
-		t.refresh(&m)
-	}
-
-	return m, cmd
 }
 
 var (

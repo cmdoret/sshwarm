@@ -22,9 +22,9 @@ func TestPrintStatus(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]string{
-		"MACHINE":            "MACHINE STATE REV DEPLOYED GEN UPTIME REBOOT FAILED STACKS",
-		"app-node-argiope":   "app-node-argiope degraded 0123456-dirty 2h 42 25h yes 1 1/3",
-		"garage-node-neatus": "garage-node-neatus down - - - - - - -",
+		"MACHINE":            "MACHINE STATE REV DEPLOYED UPTIME REBOOT FAILED STACKS",
+		"app-node-argiope":   "app-node-argiope degraded 0123456-dirty 2h 25h yes 1 1/3",
+		"garage-node-neatus": "garage-node-neatus down - - - - - -",
 	} {
 		if rows[name] != want {
 			t.Errorf("row %q:\n got %q\nwant %q", name, rows[name], want)
@@ -34,7 +34,7 @@ func TestPrintStatus(t *testing.T) {
 		"app-node-argiope failed: broken.service",
 		"app-node-argiope stack immich: immich_server running (Up 2 hours (unhealthy))",
 		"app-node-argiope stack cook: cook-cookcli-1 exited (Exited (1) 5 minutes ago)",
-		"garage-node-neatus: connection refused",
+		"garage-node-neatus down: connection refused",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
