@@ -1,5 +1,5 @@
-// Package swarm talks to the machines over ssh: it lists them, probes them, and
-// streams their logs. Read-only.
+// Package swarm talks to the machines over ssh: it lists them, probes them, streams
+// their logs and descriptions, and opens shells.
 package swarm
 
 import (

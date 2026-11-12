@@ -36,22 +36,23 @@ type logLinesMsg struct {
 	done  bool
 }
 
-// text is a screen showing a remote command's output, such as logs, as a stream
-// it can follow.
+// text is a screen showing a remote command's output: logs, as a stream it can
+// follow, or a description.
 type text struct {
 	title  string
 	host   swarm.Host
-	cmd    string // the log command, as swarm.Logs runs it
+	cmd    string // as swarm.Stream runs it
 	lines  []string
 	ch     <-chan string // the current stream, nil if none
 	cancel context.CancelFunc
 
+	canFollow          bool // logs can; a description can't
 	follow, wrap, full bool // full: no title and help lines
 	pager              viewport.Model
 }
 
-func newText(title string, h swarm.Host, cmd string) *text {
-	t := &text{title: title, host: h, cmd: cmd, wrap: true, pager: viewport.New(0, 0)}
+func newText(title string, h swarm.Host, cmd string, canFollow bool) *text {
+	t := &text{title: title, host: h, cmd: cmd, canFollow: canFollow, wrap: true, pager: viewport.New(0, 0)}
 	t.pager.SetHorizontalStep(8) // left and right, once lines don't wrap
 
 	return t
@@ -65,7 +66,7 @@ func (t *text) start(ctx context.Context, follow bool) tea.Cmd {
 	ctx, t.cancel = context.WithCancel(ctx)
 	t.follow = follow
 	t.pager.SetContent("loading…")
-	t.ch = swarm.Logs(ctx, t.host, t.cmd, follow)
+	t.ch = swarm.Stream(ctx, t.host, t.cmd, follow)
 
 	return waitLog(t.ch)
 }
@@ -134,7 +135,9 @@ func (t *text) key(m *model, k tea.KeyMsg) tea.Cmd {
 	case "esc":
 		m.pop()
 	case "s":
-		return t.start(m.ctx, !t.follow)
+		if t.canFollow {
+			return t.start(m.ctx, !t.follow)
+		}
 	case "w":
 		t.wrap = !t.wrap
 		t.setContent()
@@ -167,12 +170,16 @@ func (t *text) view(m *model) string {
 
 	title := titleStyle.Render(t.title) + dimStyle.Render(fmt.Sprintf(" · %3.f%%", t.pager.ScrollPercent()*100))
 
-	follow := "s follow"
-	if t.follow {
-		follow = "s stop following"
+	help := "w wrap · f fullscreen · c copy · g/G top/bottom · esc back · q quit"
+
+	switch {
+	case t.follow:
+		help = "s stop following · " + help
+	case t.canFollow:
+		help = "s follow · " + help
 	}
 
-	return m.frame(title, t.pager.View(), follow+" · w wrap · f fullscreen · c copy · g/G top/bottom · esc back · q quit")
+	return m.frame(title, t.pager.View(), help)
 }
 
 // waitLog delivers the next lines of a stream, gathered for up to 50 ms, so a

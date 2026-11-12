@@ -164,6 +164,11 @@ func TestSSHCmd(t *testing.T) {
 	if i := slices.Index(args, "-p"); i < 0 || args[i+1] != "2222" || !slices.Contains(args[:n-3], "-tt") {
 		t.Errorf("host options and the terminal go before --: %q", args)
 	}
+
+	// No remote command: a login shell.
+	if args := sshCmd(t.Context(), Host{Address: "h"}, true, "").Args; args[len(args)-1] != "h" {
+		t.Errorf("want the destination last: %q", args)
+	}
 }
 
 // TestProbeAll runs the ssh path against a fake ssh: one good host, one refusing,
