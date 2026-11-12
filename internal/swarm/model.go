@@ -2,7 +2,6 @@ package swarm
 
 import (
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -121,32 +120,6 @@ func (r Report) Problems() []string {
 
 // Age is the time since t, on the host's clock.
 func (r Report) Age(t time.Time) time.Duration { return r.Now.Sub(t) }
-
-// short formats a duration as its largest unit: 45s, 12m, 5h, 3d.
-func short(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return strconv.Itoa(int(d.Seconds())) + "s"
-	case d < time.Hour:
-		return strconv.Itoa(int(d.Minutes())) + "m"
-	case d < 48*time.Hour:
-		return strconv.Itoa(int(d.Hours())) + "h"
-	}
-	return strconv.Itoa(int(d.Hours()/24)) + "d"
-}
-
-// shortRev keeps 7 characters of a commit, and its -dirty suffix.
-func shortRev(rev string) string {
-	if rev == "" {
-		return "-"
-	}
-	rev, dirty := strings.CutSuffix(rev, "-dirty")
-	rev = rev[:min(len(rev), 7)]
-	if dirty {
-		rev += "-dirty"
-	}
-	return rev
-}
 
 // clean drops control characters from remote text, except tabs and newlines, so
 // it can't send escape sequences (clipboard, title, links) to the terminal.

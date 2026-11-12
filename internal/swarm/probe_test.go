@@ -1,7 +1,6 @@
 package swarm
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,10 +15,11 @@ func fixture(t *testing.T) Report {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := Report{Host: Host{Name: "app-node-argiope", Address: "argiope"}}
-	if err := parse(&r, string(raw)); err != nil {
+	r, err := Parse(string(raw))
+	if err != nil {
 		t.Fatal(err)
 	}
+	r.Host = Host{Name: "app-node-argiope", Address: "argiope"}
 	return r
 }
 
@@ -33,21 +33,16 @@ func fakeBin(t *testing.T, name, script string) {
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 }
 
-var errTest = errors.New("connection refused")
-
-func TestParseAndStatus(t *testing.T) {
+func TestParse(t *testing.T) {
 	r := fixture(t)
 	if r.Generation != 42 || !r.RebootPending || len(r.Errors) != 0 {
 		t.Errorf("meta: %+v", r)
 	}
-	if got := short(r.Age(r.Deployed)); got != "2h" {
-		t.Errorf("deployed age = %s", got)
+	if r.Deployed != time.Unix(1794292800, 0) || r.Uptime != 90061520*time.Millisecond {
+		t.Errorf("deployed %v, uptime %v", r.Deployed, r.Uptime)
 	}
-	if got := short(r.Uptime); got != "25h" {
-		t.Errorf("uptime = %s", got)
-	}
-	if got := shortRev(r.Revision); got != "0123456-dirty" {
-		t.Errorf("rev = %s", got)
+	if r.Revision != "0123456789abcdef0123456789abcdef01234567-dirty" {
+		t.Errorf("rev = %s", r.Revision)
 	}
 	if len(r.Units) != 3 || r.Units[0].Result != "success" || r.Units[0].Since != time.Unix(1794296400, 0) {
 		t.Errorf("units: %+v", r.Units)
@@ -59,46 +54,15 @@ func TestParseAndStatus(t *testing.T) {
 	if len(r.Stacks) != 3 || r.StacksUp() != 1 {
 		t.Errorf("stacks: %d, up %d: %+v", len(r.Stacks), r.StacksUp(), r.Stacks)
 	}
-
-	var b strings.Builder
-	if PrintStatus(&b, []Report{r, {Host: Host{Name: "garage-node-neatus"}, Err: errTest}}) {
-		t.Error("status reported all OK")
-	}
-	out := b.String()
-	rows := map[string]string{}
-	for _, line := range strings.Split(out, "\n") {
-		if f := strings.Fields(line); len(f) > 0 && rows[f[0]] == "" { // the table, not the problems below
-			rows[f[0]] = strings.Join(f, " ")
-		}
-	}
-	for name, want := range map[string]string{
-		"MACHINE":            "MACHINE STATE REV DEPLOYED GEN UPTIME REBOOT FAILED STACKS",
-		"app-node-argiope":   "app-node-argiope degraded 0123456-dirty 2h 42 25h yes 1 1/3",
-		"garage-node-neatus": "garage-node-neatus down - - - - - - -",
-	} {
-		if rows[name] != want {
-			t.Errorf("row %q:\n got %q\nwant %q", name, rows[name], want)
-		}
-	}
-	for _, want := range []string{
-		"app-node-argiope failed: broken.service",
-		"app-node-argiope stack immich: immich_server running (Up 2 hours (unhealthy))",
-		"app-node-argiope stack cook: cook-cookcli-1 exited (Exited (1) 5 minutes ago)",
-		"garage-node-neatus: connection refused",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in:\n%s", want, out)
-		}
-	}
 }
 
 // A command that fails on the host is a problem, not a silent gap.
 func TestProbeErrors(t *testing.T) {
-	r := Report{}
 	out := "### meta\nnow=1\ndocker=true\n### units\n[]\n" +
 		"### error containers\nCannot connect to the Docker daemon\n" +
 		"### error version\nnixos-version:\n  not found\n"
-	if err := parse(&r, out); err != nil {
+	r, err := Parse(out)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !r.HasDocker {
@@ -108,13 +72,9 @@ func TestProbeErrors(t *testing.T) {
 	if !slices.Equal(r.Problems(), want) {
 		t.Errorf("problems = %q, want %q", r.Problems(), want)
 	}
-	if row := machineRow(r); row.cells[1].text != "degraded" {
-		t.Errorf("state = %q", row.cells[1].text)
-	}
 
 	// Units that don't parse: the rest of the report still shows.
-	r = Report{}
-	if err := parse(&r, "### meta\nnow=1\ngeneration=3\n### units\nnot json\n"); err != nil {
+	if r, err = Parse("### meta\nnow=1\ngeneration=3\n### units\nnot json\n"); err != nil {
 		t.Fatal(err)
 	}
 	if r.Generation != 3 || len(r.Errors) != 1 || !strings.HasPrefix(r.Errors[0], "units: ") {
@@ -145,7 +105,7 @@ func TestSSHCmd(t *testing.T) {
 func TestLoadHosts(t *testing.T) {
 	// The fake nix echoes the flake reference it was given into the hostname.
 	fakeBin(t, "nix", `echo "{\"b-node\":{\"hostname\":\"$3\",\"sshUser\":\"\",\"sshOpts\":[\"-p\",\"2\"]},\"a-node\":{\"hostname\":\"h\",\"sshUser\":\"u\",\"sshOpts\":[]}}"`)
-	hosts, err := LoadHosts(t.Context(), "nix")
+	hosts, err := LoadFlake(t.Context(), "nix")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +117,7 @@ func TestLoadHosts(t *testing.T) {
 	}
 
 	fakeBin(t, "nix", `echo "{}"`)
-	if _, err := LoadHosts(t.Context(), "."); err == nil || !strings.Contains(err.Error(), "no machines") {
+	if _, err := LoadFlake(t.Context(), "."); err == nil || !strings.Contains(err.Error(), "no machines") {
 		t.Errorf("empty deploy.nodes: %v", err)
 	}
 }
@@ -168,7 +128,7 @@ func TestProbeAll(t *testing.T) {
 	// Like real ssh: destination right after --, then the remote command.
 	fakeBin(t, "ssh", `
 while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done
-case "$3" in "timeout "*" bash -s") ;; *) echo "ssh: bad destination or command: $2 $3" >&2; exit 255 ;; esac
+case "$3" in "timeout "*" bash -s -- 'sudo -n docker'") ;; *) echo "ssh: bad destination or command: $2 $3" >&2; exit 255 ;; esac
 cat >/dev/null
 case "$2" in
   slow) sleep 5 ;;
@@ -201,7 +161,7 @@ cat testdata/argiope.probe
 func TestCleanLogLines(t *testing.T) {
 	fakeBin(t, "ssh", `printf 'user \033]52;c;aGk=\007logged in\r\n\tindented\n'`)
 	var got []string
-	for line := range streamLines(t.Context(), Host{Address: "h"}, "cmd", false) {
+	for line := range StreamLines(t.Context(), Host{Address: "h"}, "cmd", false) {
 		got = append(got, line)
 	}
 	if want := []string{"user ]52;c;aGk=logged in", "\tindented"}; !slices.Equal(got, want) {
@@ -221,8 +181,8 @@ func TestRecordedProbes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var r Report
-		if err := parse(&r, string(raw)); err != nil || len(r.Errors) > 0 || len(r.Units) == 0 || r.Now.IsZero() {
+		r, err := Parse(string(raw))
+		if err != nil || len(r.Errors) > 0 || len(r.Units) == 0 || r.Now.IsZero() {
 			t.Errorf("%s: err %v, errors %q, %d units", f, err, r.Errors, len(r.Units))
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cmdoret/sshwarm/internal/swarm"
+	"github.com/cmdoret/sshwarm/internal/ui"
 )
 
 const (
@@ -73,7 +74,7 @@ func parseGlobal(args []string) (options, []string, error) {
 // Without a command, it opens the browser.
 func run(opts options, args []string) error {
 	if len(args) == 0 {
-		return swarm.RunTUI(opts.flake, opts.timeout, opts.refresh)
+		return ui.Run(opts.flake, opts.timeout, opts.refresh)
 	}
 
 	switch args[0] {
@@ -102,7 +103,7 @@ func statusCmd(opts options, args []string) error {
 		return err
 	}
 
-	if !swarm.PrintStatus(os.Stdout, swarm.ProbeAll(ctx, hosts, opts.timeout, false)) {
+	if !ui.PrintStatus(os.Stdout, swarm.ProbeAll(ctx, hosts, opts.timeout, false)) {
 		return errReported
 	}
 
@@ -153,7 +154,7 @@ func newFlagSet(name string) *flag.FlagSet {
 
 // machines loads the flake's machines and keeps those named, or all without names.
 func machines(ctx context.Context, flake string, names []string) ([]swarm.Host, error) {
-	hosts, err := swarm.LoadHosts(ctx, flake)
+	hosts, err := swarm.LoadFlake(ctx, flake)
 	if err != nil {
 		return nil, err
 	}

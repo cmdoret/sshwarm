@@ -1,4 +1,4 @@
-package swarm
+package ui
 
 import (
 	"strings"
@@ -6,6 +6,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
 func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
@@ -35,7 +37,7 @@ echo line-two
 
 	var m tea.Model = newModel(t.Context(), "nix", time.Second, time.Hour)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
-	m, _ = m.Update(hostsMsg{hosts: []Host{r.Host}})
+	m, _ = m.Update(hostsMsg{hosts: []swarm.Host{r.Host}})
 	m, _ = m.Update(reportsMsg{r})
 	expect := func(want ...string) {
 		t.Helper()
@@ -78,7 +80,8 @@ echo line-two
 	expect("with a terminal", "-n 300 -o short-iso --no-pager -f", "f stop following")
 
 	// A long line wraps instead of being cut off.
-	m, _ = m.Update(logLinesMsg{ch: m.(model).logCh, lines: []string{strings.Repeat("x", 150) + " ENDOFLONGLINE"}})
+	stream := m.(model).top().(*text).ch
+	m, _ = m.Update(logLinesMsg{ch: stream, lines: []string{strings.Repeat("x", 150) + " ENDOFLONGLINE"}})
 	expect("ENDOFLONGLINE")
 
 	// Back, then the stacks tab: cook and immich have problems, utils is fine.
@@ -93,4 +96,8 @@ echo line-two
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m, _ = m.Update(reportsMsg{{Host: r.Host, Err: errTest}})
 	expect("down: connection refused")
+
+	// Back down the stack, to the machines.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	expect("1 machines", "enter open")
 }
