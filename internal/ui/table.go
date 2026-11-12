@@ -128,7 +128,7 @@ func (t *table) view(m *model) string {
 	}
 
 	r := m.reports[t.host]
-	title := titleStyle.Render(r.Host.Name) + dimStyle.Render(fmt.Sprintf(" · %s · up %s · %s", r.Version, short(r.Uptime), m.refreshStatus()))
+	title := titleStyle.Render(r.Host.Name) + dimStyle.Render(fmt.Sprintf(" · %s · up %s · %s", r.OS, short(r.Uptime), m.refreshStatus()))
 
 	if r.Err != nil { // went down since we opened it
 		return frame(title, toneStyles[bad].Render("down: "+r.Err.Error()), "r refresh · esc back · q quit")

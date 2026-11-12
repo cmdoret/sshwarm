@@ -35,9 +35,11 @@ echo "ran: $remote"
 echo line-two
 `)
 
-	var m tea.Model = newModel(t.Context(), "nix", time.Second, time.Hour)
+	var m tea.Model = newModel(t.Context(), []swarm.Host{r.Host}, time.Second, time.Hour)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
-	m, _ = m.Update(hostsMsg{hosts: []swarm.Host{r.Host}})
+	if v := m.View(); !strings.Contains(v, "probing 1 machines") {
+		t.Errorf("before the first probe: %q", v)
+	}
 	m, _ = m.Update(reportsMsg{r})
 	expect := func(want ...string) {
 		t.Helper()
