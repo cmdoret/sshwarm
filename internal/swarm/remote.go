@@ -16,13 +16,14 @@ const (
 	// logTail is the history a logs view opens with.
 	logTail = 300
 
-	// oneShotTimeout stops a log command running on the host after a number of seconds.
+	// oneShotTimeout stops a command that isn't followed, on the host, after a number
+	// of seconds.
 	oneShotTimeout = 30
 )
 
-// sshCmd runs remote on h. It never prompts, and gives up on dead hosts and dead
-// connections quickly. tty gives the remote command a terminal, so that it's hung
-// up when ssh ends (needed to stop a followed log).
+// sshCmd runs remote on h, or with remote "", a login shell. It never prompts, and
+// gives up on dead hosts and dead connections quickly. tty gives the remote command
+// a terminal, so that it's hung up when ssh ends (needed to stop a followed log).
 func sshCmd(ctx context.Context, h Host, tty bool, remote string) *exec.Cmd {
 	args := []string{
 		"-o", "BatchMode=yes",
@@ -34,7 +35,12 @@ func sshCmd(ctx context.Context, h Host, tty bool, remote string) *exec.Cmd {
 		args = append(args, "-tt", "-q")
 	}
 
-	cmd := exec.CommandContext(ctx, "ssh", slices.Concat(args, h.Opts, []string{"--", h.Address, remote})...)
+	args = slices.Concat(args, h.Opts, []string{"--", h.Address})
+	if remote != "" {
+		args = append(args, remote)
+	}
+
+	cmd := exec.CommandContext(ctx, "ssh", args...)
 	// When ~/.ssh/config shares connections (ControlPersist), the background master
 	// keeps ssh's output open: don't wait for it once ssh itself has exited. Wait then
 	// returns exec.ErrWaitDelay.
@@ -43,18 +49,18 @@ func sshCmd(ctx context.Context, h Host, tty bool, remote string) *exec.Cmd {
 	return cmd
 }
 
-// UnitLogs is the log command of a systemd unit, for Logs.
+// UnitLogs is the log command of a systemd unit, for Stream.
 func UnitLogs(unit string) string {
 	return fmt.Sprintf("journalctl -u %s -n %d -o short-iso --no-pager", quote(unit), logTail)
 }
 
-// StackLogs is the log command of a compose stack, all its containers, for Logs.
+// StackLogs is the log command of a compose stack, all its containers, for Stream.
 // docker is the command that reaches docker on the host: Report.Docker.
 func StackLogs(docker, stack string) string {
 	return fmt.Sprintf("%s compose -p %s logs --tail %d --no-color", docker, quote(stack), logTail)
 }
 
-// ContainerLogs is the log command of one container, for Logs. docker: see StackLogs.
+// ContainerLogs is the log command of one container, for Stream. docker: see StackLogs.
 func ContainerLogs(docker, container string) string {
 	return fmt.Sprintf("%s logs --tail %d %s", docker, logTail, quote(container))
 }
@@ -63,7 +69,7 @@ func ContainerLogs(docker, container string) string {
 // those that come next too. A followed command gets a terminal, so that ending ssh
 // hangs it up; any other stops on the host after oneShotTimeout. The channel closes
 // when the command ends or ctx is cancelled.
-func Logs(ctx context.Context, h Host, cmd string, follow bool) <-chan string {
+func Stream(ctx context.Context, h Host, cmd string, follow bool) <-chan string {
 	if follow {
 		return streamLines(ctx, h, true, cmd+" -f")
 	}
