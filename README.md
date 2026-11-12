@@ -4,7 +4,7 @@
 
 <h1 align="center">sshwarm</h1>
 
-<p align="center"><b><a href="https://k9scli.io">k9s</a> for ssh.</b> Your NixOS machines, their services, containers and logs, in one terminal.</p>
+<p align="center"><b><a href="https://k9scli.io">k9s</a> for ssh.</b> Your Linux machines, their services, containers and logs, in one terminal.</p>
 
 <p align="center"><img src="assets/sshwarm.gif" alt="" width="720"></p>
 
@@ -19,26 +19,38 @@ glance, with the logs of whatever is red a keypress away.
 ## Get it
 
 ```sh
-nix run github:cmdoret/sshwarm -- --flake ./nix
 go install github.com/cmdoret/sshwarm@latest
+```
+
+Or run directly from the flake using nix:
+```sh
+nix run github:cmdoret/sshwarm -- --hosts hosts.toml
 ```
 
 ## Requirements
 
-- `ssh`, `nix`, and a flake listing the machines in `deploy.nodes`, as for
-  [deploy-rs](https://github.com/serokell/deploy-rs): `hostname` and `sshUser`.
-- NixOS machines reachable over ssh without a password prompt (keys or agent) with:
+- `ssh`, and the machines listed in a TOML hosts file, or in a flake's `deploy.nodes`
+  as for [deploy-rs](https://github.com/serokell/deploy-rs) (then also `nix`).
+- Linux machines with systemd and bash, reachable over ssh without a password prompt
+  (keys or agent), with:
     - ssh user in the `systemd-journal` group.
     - passwordless `sudo docker`.
-    - optional: `system.configurationRevision` set in the machines' configuration.
 
 ## Use
 
 ```sh
-sshwarm --flake ./nix              # browse: machines, then services and stacks, then logs
+sshwarm --hosts hosts.toml         # browse: machines, then services and stacks, then logs
 sshwarm --flake ./nix status web   # the table, for the machines whose name contains "web"
 ```
 
-Set `SSHWARM_FLAKE` to skip `--flake`. The rest: `sshwarm help`.
+```toml
+# hosts.toml: one [[host]] per machine
+[[host]]
+name = "web-1"
+host = "web-1.example.org"   # optional, and so are user and key; host defaults to the name
+user = "deploy"
+key  = "~/.ssh/web"
+```
 
-<sub>GPL-3.0</sub>
+Anything else ssh needs, like ports or jump hosts, comes from `~/.ssh/config`. Set
+`SSHWARM_HOSTS` or `SSHWARM_FLAKE` to skip the flag. The rest: `sshwarm help`.

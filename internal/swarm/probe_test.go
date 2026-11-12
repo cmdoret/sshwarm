@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 )
@@ -41,7 +40,7 @@ func fakeBin(t *testing.T, name, script string) {
 
 func TestParse(t *testing.T) {
 	r := fixture(t)
-	if !r.RebootPending || !r.HasDocker || len(r.Errors) != 0 {
+	if r.OS != "NixOS 26.05 (Yarara)" || !r.RebootPending || !r.HasDocker || len(r.Errors) != 0 {
 		t.Errorf("meta: %+v", r)
 	}
 
@@ -71,11 +70,32 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// Elsewhere than NixOS, there is no deploy time or revision, and nothing's wrong.
+func TestParseNotNixOS(t *testing.T) {
+	raw, err := os.ReadFile("testdata/debian.probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Parse(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if r.OS != "Debian GNU/Linux 12 (bookworm)" || !r.RebootPending || r.HasDocker || len(r.Units) != 2 {
+		t.Errorf("%+v", r)
+	}
+
+	if !r.Deployed.IsZero() || r.Revision != "" || len(r.Problems()) != 0 {
+		t.Errorf("deployed %v, revision %q, problems %q", r.Deployed, r.Revision, r.Problems())
+	}
+}
+
 // A command that fails on the host is a problem, not a silent gap.
 func TestProbeErrors(t *testing.T) {
-	out := "### meta\nnow=1\ndocker=true\n### units\n\n" +
+	out := "### meta\nnow=1\ndocker=true\n" +
 		"### error containers\nCannot connect to the Docker daemon\n" +
-		"### error version\nnixos-version:\n  not found\n"
+		"### error units\nFailed to connect\n  to bus\n"
 
 	r, err := Parse(out)
 	if err != nil {
@@ -86,7 +106,7 @@ func TestProbeErrors(t *testing.T) {
 		t.Error("docker that fails must still count as present")
 	}
 
-	want := []string{"containers: Cannot connect to the Docker daemon", "version: nixos-version: not found"}
+	want := []string{"containers: Cannot connect to the Docker daemon", "units: Failed to connect to bus"}
 	if !slices.Equal(r.Problems(), want) {
 		t.Errorf("problems = %q, want %q", r.Problems(), want)
 	}
@@ -106,29 +126,6 @@ func TestSSHCmd(t *testing.T) {
 
 	if i := slices.Index(args, "-p"); i < 0 || args[i+1] != "2222" || !slices.Contains(args[:n-3], "-tt") {
 		t.Errorf("host options and the terminal go before --: %q", args)
-	}
-}
-
-func TestLoadFlake(t *testing.T) {
-	// The fake nix echoes the flake reference it was given into the hostname.
-	fakeBin(t, "nix", `echo "{\"b-node\":{\"hostname\":\"$3\",\"sshUser\":\"\",\"sshOpts\":[\"-p\",\"2\"]},\"a-node\":{\"hostname\":\"h\",\"sshUser\":\"u\",\"sshOpts\":[]}}"`)
-
-	hosts, err := LoadFlake(t.Context(), "nix")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if hosts[0].Address != "u@h" || hosts[1].Name != "b-node" || !slices.Equal(hosts[1].Opts, []string{"-p", "2"}) {
-		t.Errorf("%+v", hosts)
-	}
-
-	if abs, _ := filepath.Abs("nix"); hosts[1].Address != abs+"#deploy" {
-		t.Errorf("the flake must be an absolute path, not a registry name: %q", hosts[1].Address)
-	}
-
-	fakeBin(t, "nix", `echo "{}"`)
-	if _, err := LoadFlake(t.Context(), "."); err == nil || !strings.Contains(err.Error(), "no machines") {
-		t.Errorf("empty deploy.nodes: %v", err)
 	}
 }
 

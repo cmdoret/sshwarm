@@ -23,22 +23,16 @@ type screen interface {
 }
 
 type (
-	hostsMsg struct {
-		hosts []swarm.Host
-		err   error
-	}
 	reportsMsg []swarm.Report
 	tickMsg    int // refresh generation, so a manual refresh doesn't double the timer
 )
 
 type model struct {
 	ctx               context.Context // cancelled when sshwarm exits: ends every ssh it started
-	flake             string
 	timeout, interval time.Duration
 
 	hosts      []swarm.Host
 	reports    []swarm.Report
-	err        error
 	refreshing bool
 	refreshed  time.Time
 	tickGen    int
@@ -48,26 +42,28 @@ type model struct {
 	stack         []screen // the machines at the bottom; the top one is shown
 }
 
-func newModel(ctx context.Context, flake string, timeout, interval time.Duration) model {
+func newModel(ctx context.Context, hosts []swarm.Host, timeout, interval time.Duration) model {
 	return model{
-		ctx: ctx, flake: flake, timeout: timeout, interval: interval,
+		ctx: ctx, hosts: hosts, timeout: timeout, interval: interval, refreshing: true,
 		stack: []screen{newTable(machines, -1)},
 	}
 }
 
-func (m model) Init() tea.Cmd {
-	return func() tea.Msg {
-		h, err := swarm.LoadFlake(m.ctx, m.flake)
-		return hostsMsg{h, err}
-	}
-}
+// Init probes the machines a first time.
+func (m model) Init() tea.Cmd { return m.probe() }
 
+// refresh probes the machines again, unless a probe is still running.
 func (m *model) refresh() tea.Cmd {
-	if m.refreshing || m.hosts == nil {
+	if m.refreshing {
 		return nil
 	}
 
 	m.refreshing = true
+
+	return m.probe()
+}
+
+func (m model) probe() tea.Cmd {
 	ctx, hosts, timeout := m.ctx, m.hosts, m.timeout
 
 	return func() tea.Msg { return reportsMsg(swarm.ProbeAll(ctx, hosts, timeout)) }
@@ -106,15 +102,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, s := range m.stack {
 			s.resize(m.width, m.height)
 		}
-	case hostsMsg:
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-
-		m.hosts = msg.hosts
-
-		return m, m.refresh()
 	case reportsMsg:
 		m.reports, m.refreshing, m.refreshed = msg, false, time.Now()
 		m.rows()
@@ -163,11 +150,8 @@ var (
 )
 
 func (m model) View() string {
-	switch {
-	case m.err != nil:
-		return fmt.Sprintf("error: %v\n\nq to quit\n", m.err)
-	case m.reports == nil:
-		return "probing the machines from the flake…\n"
+	if m.reports == nil {
+		return fmt.Sprintf("probing %d machines…\n", len(m.hosts))
 	}
 
 	return m.top().view(&m)
@@ -187,11 +171,11 @@ func (m model) refreshStatus() string {
 	return "refreshed " + m.refreshed.Format(time.TimeOnly)
 }
 
-// Run browses the machines of the flake in flakeDir until the user quits.
-func Run(flakeDir string, timeout, interval time.Duration) error {
+// Run browses the machines until the user quits.
+func Run(hosts []swarm.Host, timeout, interval time.Duration) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // however the TUI ends, no log stream or probe outlives it
-	_, err := tea.NewProgram(newModel(ctx, flakeDir, timeout, interval), tea.WithAltScreen()).Run()
+	_, err := tea.NewProgram(newModel(ctx, hosts, timeout, interval), tea.WithAltScreen()).Run()
 
 	return err
 }

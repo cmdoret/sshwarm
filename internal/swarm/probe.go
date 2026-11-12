@@ -6,12 +6,10 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,57 +19,6 @@ import (
 
 //go:embed probe.sh
 var probeScript string
-
-// LoadFlake reads deploy.nodes from the flake in flakeDir, with deploy-rs's
-// defaults for sshUser and sshOpts.
-func LoadFlake(ctx context.Context, flakeDir string) ([]Host, error) {
-	// Absolute, or nix reads a bare "nix" as the registry's github:NixOS/nix.
-	dir, err := filepath.Abs(flakeDir)
-	if err != nil {
-		return nil, err
-	}
-
-	cmd := exec.CommandContext(ctx, "nix", "eval", "--json", dir+"#deploy", "--apply", `d: builtins.mapAttrs (_: n: {
-		inherit (n) hostname;
-		sshUser = n.sshUser or d.sshUser or "";
-		sshOpts = n.sshOpts or d.sshOpts or [ ];
-	}) d.nodes`)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("nix eval: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-
-	var nodes map[string]struct {
-		Hostname, SSHUser string
-		SSHOpts           []string
-	}
-	if err := json.Unmarshal(out, &nodes); err != nil {
-		return nil, fmt.Errorf("nix eval output: %w", err)
-	}
-
-	if len(nodes) == 0 {
-		return nil, fmt.Errorf("no machines in %s#deploy.nodes", dir)
-	}
-
-	var hosts []Host
-
-	for _, name := range slices.Sorted(maps.Keys(nodes)) {
-		n := nodes[name]
-
-		addr := n.Hostname
-		if n.SSHUser != "" {
-			addr = n.SSHUser + "@" + addr
-		}
-
-		hosts = append(hosts, Host{Name: name, Address: addr, Opts: n.SSHOpts})
-	}
-
-	return hosts, nil
-}
 
 // ProbeAll probes the hosts in parallel, each within timeout. The reports keep the
 // hosts' order.
@@ -159,6 +106,8 @@ func Parse(out string) (Report, error) {
 
 	kv := keyValues(meta)
 	r := Report{
+		OS:            kv["os"],
+		Revision:      kv["revision"],
 		Now:           unix(kv["now"]),
 		Deployed:      unix(kv["deployed"]),
 		RebootPending: kv["reboot"] == "true",
@@ -178,15 +127,6 @@ func Parse(out string) (Report, error) {
 	}
 
 	slices.Sort(r.Errors)
-
-	if raw, ok := sec["version"]; ok {
-		var v struct{ NixosVersion, ConfigurationRevision string }
-		if err := json.Unmarshal([]byte(raw), &v); err != nil {
-			r.Errors = append(r.Errors, "version: "+err.Error())
-		}
-
-		r.Version, r.Revision = v.NixosVersion, v.ConfigurationRevision
-	}
 
 	return r, nil
 }
