@@ -39,7 +39,7 @@ type logLinesMsg struct {
 // text is a screen showing a remote command's output: logs, as a stream it can
 // follow, or a description.
 type text struct {
-	title  string
+	title  string // after the machine's name: a unit, "stack db", "describe web-1"...
 	host   swarm.Host
 	cmd    string // as swarm.Stream runs it
 	lines  []string
@@ -47,7 +47,7 @@ type text struct {
 	cancel context.CancelFunc
 
 	canFollow          bool // logs can; a description can't
-	follow, wrap, full bool // full: no title and help lines
+	follow, wrap, full bool // full: no frame or help line
 	pager              viewport.Model
 }
 
@@ -117,14 +117,13 @@ func (t *text) setContent() {
 	t.pager.SetContent(content)
 }
 
-// resize gives the pager the window, but for the title and help lines unless
-// fullscreen.
+// resize gives the pager the window, but for the frame unless fullscreen.
 func (t *text) resize(width, height int) {
 	if !t.full {
-		height -= chrome
+		width, height = width-sides, height-chrome
 	}
 
-	t.pager.Width, t.pager.Height = width, max(height, 1)
+	t.pager.Width, t.pager.Height = max(width, 1), max(height, 1)
 	t.setContent()
 }
 
@@ -168,7 +167,8 @@ func (t *text) view(m *model) string {
 		return strings.Join(lines, "\n")
 	}
 
-	title := titleStyle.Render(t.title) + dimStyle.Render(fmt.Sprintf(" · %3.f%%", t.pager.ScrollPercent()*100))
+	title := crumbs(t.host.Name, t.title)
+	status := dimStyle.Render(fmt.Sprintf("%3.f%%", t.pager.ScrollPercent()*100))
 
 	help := "w wrap · f fullscreen · c copy · g/G top/bottom · esc back · q quit"
 
@@ -179,7 +179,7 @@ func (t *text) view(m *model) string {
 		help = "s follow · " + help
 	}
 
-	return m.frame(title, t.pager.View(), help)
+	return m.frame(title, status, t.pager.View(), help)
 }
 
 // waitLog delivers the next lines of a stream, gathered for up to 50 ms, so a

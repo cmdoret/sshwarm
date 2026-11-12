@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -64,7 +65,8 @@ func (s *session) logs(key string) {
 	s.m = m
 }
 
-// expect checks that the screen shows each of want, and fits the window.
+// expect checks that the screen shows each of want, and fills the window exactly:
+// the frame's bottom edge sits right above the help line.
 func (s *session) expect(want ...string) {
 	s.t.Helper()
 
@@ -75,8 +77,8 @@ func (s *session) expect(want ...string) {
 		}
 	}
 
-	if n := strings.Count(v, "\n") + 1; n > 30 {
-		s.t.Errorf("view is %d lines, taller than the window:\n%s", n, v)
+	if n := strings.Count(v, "\n") + 1; n != 30 {
+		s.t.Errorf("view is %d lines, not the window's 30:\n%s", n, v)
 	}
 
 	if w := lipgloss.Width(v); w > s.m.(model).width {
@@ -121,12 +123,21 @@ echo line-two
 		t.Error("a key acted before the first probe")
 	}
 
-	s := start(t, r)
-	s.expect("sshwarm", "app-node-argiope", "0123456-dirty", "failed: broken.service")
+	// The spinner turns while probing, and stops with the probe.
+	if _, cmd := m.Update(spinner.TickMsg{}); cmd == nil {
+		t.Error("no spinner while probing")
+	}
 
-	// Machine view: the failed unit comes first.
+	s := start(t, r)
+	s.expect("sshwarm", "machines 1", "app-node-argiope", "2/3", "failed: broken.service")
+
+	if _, cmd := s.m.Update(spinner.TickMsg{}); cmd != nil {
+		t.Error("the spinner turns after the probe")
+	}
+
+	// Machine view: the revision in the title, the failed unit first.
 	s.keys("enter")
-	s.expect("services 3", "stacks 3", "containers 5", "broken.service", "compose-immich.service")
+	s.expect("app-node-argiope · NixOS 26.05 (Yarara) · rev 0123456-dirty · up 25h", "services 3", "stacks 3", "containers 5", "broken.service", "compose-immich.service")
 
 	if v := s.m.View(); strings.Index(v, "broken.service") > strings.Index(v, "compose-immich.service") {
 		t.Error("failed unit not first")
@@ -146,7 +157,7 @@ echo line-two
 
 	// Logs of the selected (failed) unit.
 	s.logs("enter")
-	s.expect("app-node-argiope · broken.service", `journalctl -u '\''broken.service'\'' -n 300`, "line-two", "s follow")
+	s.expect("app-node-argiope › broken.service", `journalctl -u '\''broken.service'\'' -n 300`, "line-two", "s follow")
 
 	// Following adds -f and a terminal, so the remote side is hung up when we leave.
 	s.logs("s")
@@ -170,7 +181,7 @@ echo line-two
 
 	// Back down, to the machines.
 	s.keys("esc")
-	s.expect("1 machines", "enter open")
+	s.expect("machines 1", "enter open")
 }
 
 // Stacks open on their containers, the command bar goes to any machine's table,
@@ -194,7 +205,7 @@ func TestNavigation(t *testing.T) {
 	s.keys(":", "ctr nope", "enter")
 	s.expect(`no machine matches "nope"`)
 	s.keys(":", "x", "enter")
-	s.expect(`no "x" here: try machines, services/svc, stacks/compose, containers/ctr`)
+	s.expect(`no "x" here: try machines, services/svc, stacks/st, containers/ctr`)
 
 	// :ctr arg: every compose container of argiope.
 	s.keys(":", "ctr arg", "enter")
@@ -208,12 +219,12 @@ func TestNavigation(t *testing.T) {
 
 	// A stack: enter opens its containers, and l their logs.
 	s.keys("enter")
-	s.expect("app-node-argiope · stack cook", "containers 1", "cook-cookcli-1")
+	s.expect("app-node-argiope › stack cook", "containers 1", "cook-cookcli-1")
 	s.logs("l")
-	s.expect("app-node-argiope · container cook-cookcli-1", `ran: timeout 30 sh -c 'docker logs --tail 300 '\''cook-cookcli-1'\'''`)
+	s.expect("app-node-argiope › container cook-cookcli-1", `ran: timeout 30 sh -c 'docker logs --tail 300 '\''cook-cookcli-1'\'''`)
 
 	// Wrapped, the long line's end shows; unwrapped, it's off the screen.
-	s.expect("ENDOFLONGLINE", "w wrap · f fullscreen · c copy")
+	s.expect("ENDOFLONGLINE", "w wrap • f fullscreen • c copy")
 	s.keys("w")
 
 	if strings.Contains(s.m.View(), "ENDOFLONGLINE") {
@@ -253,7 +264,7 @@ func TestNavigation(t *testing.T) {
 
 	// :machines goes back to the bottom.
 	s.keys(":", "machines", "enter")
-	s.expect("1 machines", "enter open")
+	s.expect("machines 1", "enter open")
 }
 
 // d describes a machine, a unit, a stack or a container, and s opens a shell on a
@@ -283,13 +294,13 @@ func TestActions(t *testing.T) {
 
 	// d on a machine: what it is, its CPUs and what uses them, memory, disks.
 	s.logs("d")
-	s.expect("app-node-argiope · describe", "hostnamectl", "lscpu", "top -b -n 2", "df -h")
+	s.expect("app-node-argiope › describe", "hostnamectl", "lscpu", "top -b -n 2", "df -h")
 	s.keys("esc")
 
 	// d on the failed unit: its status, nothing to follow.
 	s.keys("enter")
 	s.logs("d")
-	s.expect("app-node-argiope · describe broken.service", `ran: timeout 30 sh -c 'systemctl status --no-pager '\''broken.service'\'' || true'`)
+	s.expect("app-node-argiope › describe broken.service", `ran: timeout 30 sh -c 'systemctl status --no-pager '\''broken.service'\'' || true'`)
 
 	if strings.Contains(s.m.View(), "s follow") {
 		t.Error("a description offers to follow")
@@ -328,7 +339,7 @@ func TestActions(t *testing.T) {
 	// machines table's rows.
 	s.resize(60)
 	s.keys("j") // clears the message
-	s.expect("enter logs · d describe · s shell", "…")
+	s.expect("enter logs • d describe • s shell", "…")
 	s.keys(":", "machines", "enter")
 	s.expect("MACHINE")
 }

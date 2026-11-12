@@ -70,7 +70,7 @@ var machines = &kind{
 }
 
 // machineTitles head the machines table: `sshwarm status` prints all but PROBLEMS.
-var machineTitles = []string{"MACHINE", "STATE", "REV", "DEPLOYED", "UPTIME", "REBOOT", "FAILED", "STACKS", "PROBLEMS"}
+var machineTitles = []string{"MACHINE", "STATE", "DEPLOY", "UP", "REBOOT", "UNITS", "STACKS", "PROBLEMS"}
 
 // machineRow is a machine's row, for both the TUI and `sshwarm status`. Only the
 // fields needing attention are colored, unless the machine is down.
@@ -89,15 +89,6 @@ func machineRow(r swarm.Report) row {
 		state = dot(warn, "degraded")
 	}
 
-	rev := cell{text: shortRev(r.Revision)}
-
-	switch {
-	case r.Revision == "":
-		rev.tone = dim
-	case strings.HasSuffix(r.Revision, "-dirty"):
-		rev.tone = warn
-	}
-
 	deployed := cell{text: "-"}
 	if !r.Deployed.IsZero() {
 		deployed.text = short(r.Age(r.Deployed))
@@ -108,11 +99,19 @@ func machineRow(r swarm.Report) row {
 		reboot = cell{text: "yes", tone: warn}
 	}
 
-	nFailed := len(r.Failed())
+	// Units as stacks: how many of those the services tab lists are fine.
+	watched := 0
+	for _, u := range r.Units {
+		if u.Interesting() {
+			watched++
+		}
+	}
 
-	failed := cell{text: strconv.Itoa(nFailed)}
-	if nFailed > 0 {
-		failed.tone = bad
+	failed := len(r.Failed())
+
+	units := cell{text: fmt.Sprintf("%d/%d", watched-failed, watched)}
+	if failed > 0 {
+		units.tone = bad
 	}
 
 	stackCell := cell{text: "-"}
@@ -126,7 +125,7 @@ func machineRow(r swarm.Report) row {
 	}
 
 	return row{key: r.Host.Name, cells: []cell{
-		{text: r.Host.Name}, state, rev, deployed, {text: short(r.Uptime)}, reboot, failed, stackCell,
+		{text: r.Host.Name}, state, deployed, {text: short(r.Uptime)}, reboot, units, stackCell,
 		{text: strings.Join(problems, "; "), tone: bad},
 	}}
 }
@@ -144,16 +143,15 @@ var services = &kind{
 	},
 }
 
-// serviceRows lists a machine's failed and enabled units, failed first; with m.all,
-// every unit. The rest are static or inactive units: hundreds of them, rarely of
-// interest.
+// serviceRows lists a machine's interesting units, failed first; with m.all, every
+// unit.
 func serviceRows(m *model, host int, _ string) []row {
 	r := m.reports[host]
 
 	var units []swarm.Unit
 
 	for _, u := range r.Units {
-		if m.all || u.Active == "failed" || u.UnitFileState == "enabled" {
+		if m.all || u.Interesting() {
 			units = append(units, u)
 		}
 	}
@@ -319,10 +317,6 @@ func short(d time.Duration) string {
 
 // shortRev keeps 7 characters of a commit, and its -dirty suffix.
 func shortRev(rev string) string {
-	if rev == "" {
-		return "-"
-	}
-
 	rev, dirty := strings.CutSuffix(rev, "-dirty")
 	rev = rev[:min(len(rev), 7)]
 

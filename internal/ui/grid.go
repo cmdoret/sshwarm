@@ -27,6 +27,10 @@ var toneStyles = map[tone]lipgloss.Style{
 	dim:  dimStyle,
 }
 
+// selection is the cursor row's background: a gray a step off the terminal's own,
+// under which every tone stays readable.
+var selection = lipgloss.AdaptiveColor{Light: "254", Dark: "237"}
+
 type cell struct {
 	text string
 	tone tone
@@ -64,8 +68,8 @@ func (g *grid) setRows(rows []row) {
 	g.clamp()
 }
 
-// visible is the number of rows shown under the header and its rule.
-func (g grid) visible() int { return max(g.height-2, 1) }
+// visible is the number of rows shown under the header.
+func (g grid) visible() int { return max(g.height-1, 1) }
 
 // clamp keeps the cursor on a row, and the view on the cursor.
 func (g *grid) clamp() {
@@ -136,8 +140,7 @@ func (g grid) view() string {
 
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render(head) + "\n")
-	b.WriteString(dimStyle.Render(strings.Repeat("─", runewidth.StringWidth(head))))
+	b.WriteString(titleStyle.Render(head))
 
 	for i := g.offset; i < g.offset+g.visible(); i++ {
 		b.WriteString("\n")
@@ -151,7 +154,8 @@ func (g grid) view() string {
 }
 
 // renderRow draws row i, a cell per column: in the cell's tone, or else the row's.
-// The selected row is one bar in the row's tone.
+// The selected row is a bold bar on a gray background, marked in the accent color
+// where its first cell's padding would be.
 func (g grid) renderRow(i int, widths []int) string {
 	r := g.rows[i]
 
@@ -163,12 +167,17 @@ func (g grid) renderRow(i int, widths []int) string {
 			t = r.tone
 		}
 
-		st := toneStyles[t] // inherit: the zero style, plain
+		st, text := toneStyles[t], pad(c.shown(), widths[j]) // inherit: the zero style, plain
 		if i == g.cursor {
-			st = toneStyles[r.tone].Reverse(true)
+			st = st.Bold(true).Background(selection)
 		}
 
-		out.WriteString(st.Render(pad(c.shown(), widths[j])))
+		if i == g.cursor && j == 0 {
+			out.WriteString(keyStyle.Background(selection).Render("▌"))
+			text = text[1:] // the marker takes the padding's space
+		}
+
+		out.WriteString(st.Render(text))
 	}
 
 	return out.String()
