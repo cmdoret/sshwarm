@@ -77,6 +77,7 @@ func DescribeMachine() string {
 
 // DescribeUnit shows a systemd unit state and last lines.
 func DescribeUnit(unit string) string {
+	// systemctl status exits 3 for a unit that isn't running: that's its state, not an error.
 	return fmt.Sprintf("systemctl status --no-pager %s || true", quote(unit))
 }
 
@@ -99,11 +100,8 @@ func ContainerShell(docker, container string) string {
 		quote("command -v bash >/dev/null && exec bash || exec sh"))
 }
 
-// inSequence runs commands one after the other, in one shell, so that Stream's
-// timeout covers them all. A blank line separates their outputs.
-func inSequence(cmds ...string) string {
-	return "sh -c " + quote(strings.Join(cmds, "; echo; "))
-}
+// inSequence runs commands one after the other, a blank line between their outputs.
+func inSequence(cmds ...string) string { return strings.Join(cmds, "; echo; ") }
 
 // Interactive is ssh running remote on h with the user's terminal, or with remote
 // "", a login shell. The caller hands it the terminal.
@@ -113,14 +111,13 @@ func Interactive(ctx context.Context, h Host, remote string) *exec.Cmd {
 
 // Stream runs cmd on h and sends its output lines: the last ones, or with follow,
 // those that come next too. A followed command gets a terminal, so that ending ssh
-// hangs it up; any other stops on the host after oneShotTimeout. The channel closes
-// when the command ends or ctx is cancelled.
+// hangs it up. The channel closes when the command ends or ctx is cancelled.
 func Stream(ctx context.Context, h Host, cmd string, follow bool) <-chan string {
 	if follow {
 		return streamLines(ctx, h, true, cmd+" -f")
 	}
 
-	return streamLines(ctx, h, false, fmt.Sprintf("timeout %d %s", oneShotTimeout, cmd))
+	return streamLines(ctx, h, false, fmt.Sprintf("timeout %d sh -c %s", oneShotTimeout, quote(cmd)))
 }
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

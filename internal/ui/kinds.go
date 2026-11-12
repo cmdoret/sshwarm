@@ -24,7 +24,7 @@ type kind struct {
 	logs   func(r swarm.Report, key string) (title, cmd string) // nil: no logs
 
 	describe func(r swarm.Report, key string) (title, cmd string) // nil: nothing to describe
-	shell    func(m *model, host int, key string) tea.Cmd         // nil: no shell
+	shell    func(r swarm.Report, key string) (remote string)     // "": a login shell; nil: no shell
 }
 
 // kinds are the command bar's resources.
@@ -64,18 +64,9 @@ var machines = &kind{
 
 		return rows
 	},
-	enter: func(m *model, _ int, name string) tea.Cmd {
-		return m.push(newTable(services, machineNamed(m, name), ""))
-	},
-	shell: func(m *model, _ int, name string) tea.Cmd {
-		return m.shell(m.reports[machineNamed(m, name)].Host, "")
-	},
+	enter:    func(m *model, host int, _ string) tea.Cmd { return m.push(newTable(services, host, "")) },
+	shell:    func(swarm.Report, string) string { return "" },
 	describe: func(swarm.Report, string) (string, string) { return "describe", swarm.DescribeMachine() },
-}
-
-// machineNamed is the index of the machine with that name in m.reports.
-func machineNamed(m *model, name string) int {
-	return slices.IndexFunc(m.reports, func(r swarm.Report) bool { return r.Host.Name == name })
 }
 
 // machineTitles head the machines table: `sshwarm status` prints all but PROBLEMS.
@@ -214,7 +205,7 @@ func unitRow(r swarm.Report, u swarm.Unit) row {
 // --- stacks and containers --------------------------------------------------
 
 var stacks = &kind{
-	names:  []string{"stacks", "compose"},
+	names:  []string{"stacks", "st"},
 	help:   "enter containers · l logs · d describe",
 	titles: []string{"STACK", "OK", "PROBLEMS"},
 	rows: func(m *model, host int, _ string) []row {
@@ -260,11 +251,7 @@ var containers = &kind{
 	describe: func(r swarm.Report, name string) (string, string) {
 		return "describe container " + name, swarm.DescribeContainer(r.Docker, name)
 	},
-	shell: func(m *model, host int, name string) tea.Cmd {
-		r := m.reports[host]
-
-		return m.shell(r.Host, swarm.ContainerShell(r.Docker, name))
-	},
+	shell: func(r swarm.Report, name string) string { return swarm.ContainerShell(r.Docker, name) },
 }
 
 func stackRow(s swarm.Stack) row {

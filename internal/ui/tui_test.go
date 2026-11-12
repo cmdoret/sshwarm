@@ -16,9 +16,8 @@ import (
 
 // session drives the TUI like a user: it types keys and checks the screens.
 type session struct {
-	t     *testing.T
-	m     tea.Model
-	width int
+	t *testing.T
+	m tea.Model
 }
 
 // start opens the TUI on reports, in a 160×30 window.
@@ -39,7 +38,6 @@ func start(t *testing.T, reports ...swarm.Report) *session {
 
 // resize makes the window width columns wide, and 30 lines high.
 func (s *session) resize(width int) {
-	s.width = width
 	s.m, _ = s.m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
 }
 
@@ -81,10 +79,8 @@ func (s *session) expect(want ...string) {
 		s.t.Errorf("view is %d lines, taller than the window:\n%s", n, v)
 	}
 
-	for line := range strings.Lines(v) {
-		if w := lipgloss.Width(strings.TrimSuffix(line, "\n")); w > s.width {
-			s.t.Errorf("a line is %d columns, wider than the window: %q", w, line)
-		}
+	if w := lipgloss.Width(v); w > s.m.(model).width {
+		s.t.Errorf("view is %d columns, wider than the window:\n%s", w, v)
 	}
 }
 
@@ -150,7 +146,7 @@ echo line-two
 
 	// Logs of the selected (failed) unit.
 	s.logs("enter")
-	s.expect("app-node-argiope · broken.service", "journalctl -u 'broken.service' -n 300", "line-two", "s follow")
+	s.expect("app-node-argiope · broken.service", `journalctl -u '\''broken.service'\'' -n 300`, "line-two", "s follow")
 
 	// Following adds -f and a terminal, so the remote side is hung up when we leave.
 	s.logs("s")
@@ -165,7 +161,7 @@ echo line-two
 	s.keys("esc", "tab")
 	s.expect("cook", "0/1", "immich", "1/2", "Up 2 hours (unhealthy)", "utils", "2/2")
 	s.logs("l")
-	s.expect("stack cook", "timeout 30 sudo -n docker compose -p 'cook' logs --tail 300")
+	s.expect("stack cook", `timeout 30 sh -c 'sudo -n docker compose -p '\''cook'\'' logs --tail 300`)
 
 	// The machine goes down while we look at it: say so instead of showing nothing.
 	s.keys("esc")
@@ -214,7 +210,7 @@ func TestNavigation(t *testing.T) {
 	s.keys("enter")
 	s.expect("app-node-argiope · stack cook", "containers 1", "cook-cookcli-1")
 	s.logs("l")
-	s.expect("app-node-argiope · container cook-cookcli-1", "ran: timeout 30 docker logs --tail 300 'cook-cookcli-1'")
+	s.expect("app-node-argiope · container cook-cookcli-1", `ran: timeout 30 sh -c 'docker logs --tail 300 '\''cook-cookcli-1'\'''`)
 
 	// Wrapped, the long line's end shows; unwrapped, it's off the screen.
 	s.expect("ENDOFLONGLINE", "w wrap · f fullscreen · c copy")
@@ -293,7 +289,7 @@ func TestActions(t *testing.T) {
 	// d on the failed unit: its status, nothing to follow.
 	s.keys("enter")
 	s.logs("d")
-	s.expect("app-node-argiope · describe broken.service", "ran: timeout 30 systemctl status --no-pager 'broken.service' || true")
+	s.expect("app-node-argiope · describe broken.service", `ran: timeout 30 sh -c 'systemctl status --no-pager '\''broken.service'\'' || true'`)
 
 	if strings.Contains(s.m.View(), "s follow") {
 		t.Error("a description offers to follow")
@@ -328,8 +324,11 @@ func TestActions(t *testing.T) {
 	s.m, _ = s.m.Update(cmd())
 	s.expect("shell ended: exit status 127")
 
-	// In a narrow window, the title and help lines are cut instead of wrapped.
+	// In a narrow window, lines are cut instead of wrapped: the help line here, and the
+	// machines table's rows.
 	s.resize(60)
 	s.keys("j") // clears the message
 	s.expect("enter logs · d describe · s shell", "…")
+	s.keys(":", "machines", "enter")
+	s.expect("MACHINE")
 }

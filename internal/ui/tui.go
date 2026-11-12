@@ -291,24 +291,29 @@ func (m model) machine(name string) (int, error) {
 	return -1, errors.New("which machine? e.g. :ctr web-1")
 }
 
+// View shows the top screen, every line cut to the window's width.
 func (m model) View() string {
 	if m.reports == nil {
 		return fmt.Sprintf("probing %d machines…\n", len(m.hosts))
 	}
 
-	return m.top().view(&m)
+	lines := strings.Split(m.top().view(&m), "\n")
+	for i, l := range lines {
+		lines[i] = ansi.Truncate(l, m.width, "…")
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // frame lays out a screen: a title line, the body, and a help line, unless the
-// command bar or a message takes its place. Title and help are cut to the window's
-// width: wrapped, they would push the screen past the window's bottom.
+// command bar or a message takes its place.
 func (m *model) frame(title, body, help string) string {
 	bar := m.bar()
 	if bar == "" {
 		bar = dimStyle.Render(help)
 	}
 
-	return ansi.Truncate(title, m.width, "…") + "\n" + body + "\n" + ansi.Truncate(bar, m.width, "…")
+	return title + "\n" + body + "\n" + bar
 }
 
 // bar is the command bar while it's open, or the message if there is one.

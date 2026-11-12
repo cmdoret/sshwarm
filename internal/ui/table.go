@@ -82,16 +82,18 @@ func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
 	case "d":
 		return t.show(m, t.kind.describe, false)
 	case "s":
-		if key, ok := t.selected(); ok && t.kind.shell != nil {
-			return t.kind.shell(m, t.host, key)
+		if host, key, ok := t.selected(m); ok && t.kind.shell != nil {
+			r := m.reports[host]
+
+			return m.shell(r.Host, t.kind.shell(r, key))
 		}
 	case "enter":
 		if t.kind.enter == nil {
 			return t.show(m, t.kind.logs, true)
 		}
 
-		if key, ok := t.selected(); ok {
-			return t.kind.enter(m, t.host, key)
+		if host, key, ok := t.selected(m); ok {
+			return t.kind.enter(m, host, key)
 		}
 	default:
 		t.grid.key(k)
@@ -119,27 +121,28 @@ func (t *table) filterKey(m *model, k tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
-// selected is the key of the row under the cursor, if there is one.
-func (t *table) selected() (string, bool) {
+// selected is the row under the cursor, if there is one: its key, and the index of
+// its machine in the reports.
+func (t *table) selected(m *model) (host int, key string, ok bool) {
 	if len(t.grid.rows) == 0 {
-		return "", false
+		return -1, "", false
 	}
 
-	return t.grid.rows[t.grid.cursor].key, true
+	key = t.grid.rows[t.grid.cursor].key
+	if t.kind != machines {
+		return t.host, key, true
+	}
+
+	return slices.IndexFunc(m.reports, func(r swarm.Report) bool { return r.Host.Name == key }), key, true
 }
 
 // show runs the command that command gives for the row under the cursor, and shows
 // its output over the table: logs, which can be followed, or a description. A nil
 // command means the kind has none.
 func (t *table) show(m *model, command func(swarm.Report, string) (string, string), canFollow bool) tea.Cmd {
-	key, ok := t.selected()
+	host, key, ok := t.selected(m)
 	if !ok || command == nil {
 		return nil
-	}
-
-	host := t.host
-	if t.kind == machines {
-		host = machineNamed(m, key) // the row is the machine
 	}
 
 	r := m.reports[host]
