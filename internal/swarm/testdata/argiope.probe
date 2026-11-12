@@ -1,0 +1,32 @@
+### meta
+now=1794300000
+uptime=90061.52
+generation=42
+deployed=1794292800
+reboot=true
+docker=true
+### version
+{"nixosVersion":"26.05.20261105.c56a87d","nixpkgsRevision":"c56a87d","configurationRevision":"0123456789abcdef0123456789abcdef01234567-dirty"}
+### units
+[{"unit":"compose-immich.service","load":"loaded","active":"active","sub":"exited","description":"compose stack immich"},{"unit":"glances.service","load":"loaded","active":"active","sub":"running","description":"Glances"},{"unit":"broken.service","load":"loaded","active":"failed","sub":"failed","description":"Broken"}]
+### show
+Id=compose-immich.service
+Result=success
+UnitFileState=enabled
+StateChangeTimestamp=@1794296400
+
+Id=glances.service
+Result=success
+UnitFileState=enabled
+StateChangeTimestamp=@1794293000
+
+Id=broken.service
+Result=exit-code
+UnitFileState=enabled
+StateChangeTimestamp=@1794299000
+### containers
+immich	immich_server	running	Up 2 hours (unhealthy)
+immich	immich_redis	running	Up 2 hours (healthy)
+utils	utils-init-volumes-1	exited	Exited (0) 2 hours ago
+utils	vert	running	Up 2 hours
+cook	cook-cookcli-1	exited	Exited (1) 5 minutes ago
