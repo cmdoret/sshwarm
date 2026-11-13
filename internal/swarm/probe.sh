@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Read-only probe that `sshwarm` pipes to each machine:
 #   ssh <host> timeout <s> bash -s
 # Prints sections: a "### <name>" line, then that command's output.
@@ -23,7 +24,7 @@ reboot_pending() {
     done
     return 1
   fi
-  [ -e /var/run/reboot-required ] && return 0 # Debian, Ubuntu
+  [ -e /var/run/reboot-required ] && return 0     # Debian, Ubuntu
   if command -v needs-restarting >/dev/null; then # Fedora, RHEL: exits 1 when a reboot is needed
     needs-restarting -r >/dev/null 2>&1
     [ $? -eq 1 ] && return 0
@@ -45,6 +46,7 @@ docker_cmd() {
 }
 
 echo "### meta"
+# shellcheck source=/dev/null # the machine's
 echo "os=$(. /etc/os-release && echo "$PRETTY_NAME")"
 echo "now=$(date +%s)"
 echo "uptime=$(cut -d' ' -f1 /proc/uptime)"
@@ -61,6 +63,7 @@ echo "docker=$docker"
 section units systemctl show --timestamp=unix --no-pager \
   -p Id,ActiveState,SubState,Description,Result,UnitFileState,StateChangeTimestamp '*.service'
 if [ -n "$docker" ]; then
+  # shellcheck disable=SC2086 # words, split on purpose: "sudo -n docker"
   section containers $docker ps -a --filter label=com.docker.compose.project \
     --format '{{.Label "com.docker.compose.project"}}\t{{.Names}}\t{{.State}}\t{{.Status}}'
 fi
