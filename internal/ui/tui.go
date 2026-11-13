@@ -98,7 +98,15 @@ func (m *model) refresh() tea.Cmd {
 
 	m.refreshing = true
 
-	return tea.Batch(m.probe(), m.spin.Tick)
+	return m.probe()
+}
+
+// waiting says whether the TUI waits on the machines: on a probe, or on the
+// description on screen. The spinner turns meanwhile.
+func (m model) waiting() bool {
+	t, ok := m.top().(*text)
+
+	return m.refreshing || ok && t.card != nil && t.ch != nil
 }
 
 func (m model) probe() tea.Cmd {
@@ -144,6 +152,8 @@ func (m *model) fillTables() {
 // Update returns a command computed before m: in `return m, m.refresh()`, Go
 // doesn't say whether m is read before or after refresh changes it.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	wasWaiting := m.waiting()
+
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
@@ -163,12 +173,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = m.refresh()
 		}
 	case spinner.TickMsg:
-		if m.refreshing { // else no next tick: the spinner stops until the next refresh
+		if m.waiting() { // else no next tick: the spinner stops until the next wait
 			m.spin, cmd = m.spin.Update(msg)
 		}
 	case logLinesMsg:
 		if t, ok := m.top().(*text); ok && msg.ch == t.ch {
 			cmd = t.add(msg)
+
+			if msg.done && t.card != nil {
+				cmd = t.again(m.interval)
+			}
+		}
+	case redescribeMsg:
+		if t, ok := m.top().(*text); ok && t == msg.t && t.runs == msg.run {
+			cmd = t.start(m.ctx, false)
 		}
 	case shellDoneMsg:
 		// The alt screen is back over what the shell printed: say how it ended.
@@ -178,7 +196,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		cmd = m.refresh() // what was done there shows now
 	case tea.KeyMsg:
-		return m.key(msg)
+		var next tea.Model
+		next, cmd = m.key(msg)
+		m = next.(model)
+	}
+
+	if !wasWaiting && m.waiting() { // a wait begins, whatever began it: the spinner turns again
+		cmd = tea.Batch(cmd, m.spin.Tick)
 	}
 
 	return m, cmd
@@ -215,8 +239,6 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch s {
-	case "r":
-		cmd = m.refresh()
 	case ":":
 		cmd = m.command.Focus()
 	default:
@@ -337,7 +359,9 @@ func (m *model) frame(title, status, body, help string) string {
 
 	var b strings.Builder
 
-	fill := max(inner-6-ansi.StringWidth(title)-ansi.StringWidth(status), 1) // "╭─ " title " " fill " " status " ─╮"
+	// "╭─ " title " " fill " " status " ─╮": the title gives way first, the status is news.
+	title = ansi.Truncate(title, max(inner-7-ansi.StringWidth(status), 0), "…")
+	fill := max(inner-6-ansi.StringWidth(title)-ansi.StringWidth(status), 1)
 	b.WriteString(dimStyle.Render("╭─ ") + title + dimStyle.Render(" "+strings.Repeat("─", fill)+" ") + status + dimStyle.Render(" ─╮") + "\n")
 
 	lines := strings.Split(body, "\n")

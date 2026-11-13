@@ -1,0 +1,285 @@
+### cpus
+8
+### stats
+7.35%	0.01%	1.82MiB / 15.24GiB	1.09kB / 126B	0B / 0B	1
+### inspect
+[
+    {
+        "Id": "044c2818eb81ddf4ac21f51039e3efe213f3b902bbef8d792e00f32bdb84064e",
+        "Created": "2026-11-13T00:13:09.849759822Z",
+        "Path": "sleep",
+        "Args": [
+            "300"
+        ],
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 1807581,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-13T00:13:09.884898156Z",
+            "FinishedAt": "0001-01-01T00:00:00Z",
+            "Health": {
+                "Status": "unhealthy",
+                "FailingStreak": 7,
+                "Log": [
+                    {
+                        "Start": "2026-11-13T00:13:13.301321686Z",
+                        "End": "2026-11-13T00:13:13.396439638Z",
+                        "ExitCode": 1,
+                        "Output": "probe failed\n"
+                    },
+                    {
+                        "Start": "2026-11-13T00:13:14.397395097Z",
+                        "End": "2026-11-13T00:13:14.493305213Z",
+                        "ExitCode": 1,
+                        "Output": "probe failed\n"
+                    },
+                    {
+                        "Start": "2026-11-13T00:13:15.49448612Z",
+                        "End": "2026-11-13T00:13:15.610736366Z",
+                        "ExitCode": 1,
+                        "Output": "probe failed\n"
+                    },
+                    {
+                        "Start": "2026-11-13T00:13:16.61498595Z",
+                        "End": "2026-11-13T00:13:16.727057745Z",
+                        "ExitCode": 1,
+                        "Output": "probe failed\n"
+                    },
+                    {
+                        "Start": "2026-11-13T00:13:17.728564239Z",
+                        "End": "2026-11-13T00:13:17.826039812Z",
+                        "ExitCode": 1,
+                        "Output": "probe failed\n"
+                    }
+                ]
+            }
+        },
+        "Image": "sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6",
+        "ResolvConfPath": "/var/lib/docker/containers/044c2818eb81ddf4ac21f51039e3efe213f3b902bbef8d792e00f32bdb84064e/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/044c2818eb81ddf4ac21f51039e3efe213f3b902bbef8d792e00f32bdb84064e/hostname",
+        "HostsPath": "/var/lib/docker/containers/044c2818eb81ddf4ac21f51039e3efe213f3b902bbef8d792e00f32bdb84064e/hosts",
+        "LogPath": "/var/lib/docker/containers/044c2818eb81ddf4ac21f51039e3efe213f3b902bbef8d792e00f32bdb84064e/044c2818eb81ddf4ac21f51039e3efe213f3b902bbef8d792e00f32bdb84064e-json.log",
+        "Name": "/demo-web-1",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/srv/demo/data:/data"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "bridge",
+            "PortBindings": {
+                "80/tcp": [
+                    {
+                        "HostIp": "127.0.0.1",
+                        "HostPort": "18080"
+                    }
+                ]
+            },
+            "RestartPolicy": {
+                "Name": "unless-stopped",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "Storage": {
+            "RootFS": {
+                "Snapshot": {
+                    "Name": "overlayfs"
+                }
+            }
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/srv/demo/data",
+                "Destination": "/data",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "044c2818eb81",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "80/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "DB_PASSWORD=hunter2",
+                "TZ=Europe/Zurich",
+                "DB_HOSTNAME=db",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Cmd": [
+                "sleep",
+                "300"
+            ],
+            "Healthcheck": {
+                "Test": [
+                    "CMD-SHELL",
+                    "echo probe failed; false"
+                ],
+                "Interval": 1000000000,
+                "Retries": 3
+            },
+            "Image": "alpine:latest",
+            "Volumes": null,
+            "WorkingDir": "/",
+            "Entrypoint": null,
+            "Labels": {
+                "com.docker.compose.project": "demo",
+                "com.docker.compose.service": "web"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "cd64db02713cb8b2a5351da1380d98cafb56a56c276072da6587281dedceea1c",
+            "SandboxKey": "/var/run/docker/netns/cd64db02713c",
+            "Ports": {
+                "80/tcp": [
+                    {
+                        "HostIp": "127.0.0.1",
+                        "HostPort": "18080"
+                    }
+                ]
+            },
+            "Networks": {
+                "bridge": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "f62aee7f05b634f0e6da65c799752fa8584973368d168f56c31972c5b739f667",
+                    "EndpointID": "56db6361692dd89d0c2ec13d3fb3add4201bdea1e955229e8db3154128ad4ec7",
+                    "Gateway": "172.18.0.1",
+                    "IPAddress": "172.18.0.2",
+                    "MacAddress": "ee:b9:c6:65:53:f1",
+                    "IPPrefixLen": 16,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395",
+            "size": 1022,
+            "annotations": {
+                "com.docker.official-images.bashbrew.arch": "amd64",
+                "org.opencontainers.image.base.name": "scratch",
+                "org.opencontainers.image.created": "2026-09-17T20:36:57Z",
+                "org.opencontainers.image.revision": "1c744e2d49059e51b063a11a6e3e18c9ccf04ab8",
+                "org.opencontainers.image.source": "https://github.com/alpinelinux/docker-alpine.git#1c744e2d49059e51b063a11a6e3e18c9ccf04ab8:x86_64",
+                "org.opencontainers.image.url": "https://hub.docker.com/_/alpine",
+                "org.opencontainers.image.version": "3.24.2"
+            },
+            "platform": {
+                "architecture": "amd64",
+                "os": "linux"
+            }
+        }
+    }
+]

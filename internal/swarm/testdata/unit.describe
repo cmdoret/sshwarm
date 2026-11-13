@@ -1,0 +1,25 @@
+### show
+Id=backup.service
+Description=Nightly backup to garage
+ActiveState=failed
+SubState=failed
+Result=exit-code
+UnitFileState=enabled
+StateChangeTimestamp=@1794296400
+FragmentPath=/etc/systemd/system/backup.service
+MainPID=0
+ExecMainStatus=2
+NRestarts=3
+Restart=on-failure
+TriggeredBy=backup.timer
+MemoryCurrent=48234496
+MemoryMax=536870912
+CPUUsageNSec=1234567890
+TasksCurrent=[not set]
+### journal
+2026-11-12T03:00:01+0100 argiope backup[1234]: starting backup
+2026-11-12T03:00:05+0100 argiope backup[1234]: error: connection refused
+2026-11-12T03:00:05+0100 argiope systemd[1]: backup.service: Main process exited, code=exited, status=2/INVALIDARGUMENT
+2026-11-12T03:00:05+0100 argiope systemd[1]: backup.service: Failed with result 'exit-code'.
+### cache
+inactive_file 10485760

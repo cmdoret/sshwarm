@@ -65,43 +65,12 @@ func ContainerLogs(docker, container string) string {
 	return fmt.Sprintf("%s logs --tail %d %s", docker, logTail, quote(container))
 }
 
-// DescribeMachine shows machine CPUs, its load, busiest processes, and its disks.
-func DescribeMachine() string {
-	return inSequence(
-		"hostnamectl",
-		`LC_ALL=C lscpu | grep -E '^(CPU\(s\)|Model name):'`,
-		"top -b -n 2 -d 1 | awk '/^top -/ {n++} n == 2' | head -n 17",
-		"df -h -x tmpfs -x devtmpfs -x overlay -x squashfs", // no pseudo filesystems, container layers or snaps
-	)
-}
-
-// DescribeUnit shows a systemd unit state and last lines.
-func DescribeUnit(unit string) string {
-	// systemctl status exits 3 for a unit that isn't running: that's its state, not an error.
-	return fmt.Sprintf("systemctl status --no-pager %s || true", quote(unit))
-}
-
-// DescribeStack shows compose stack's containers and their resource usage.
-func DescribeStack(docker, stack string) string {
-	project := docker + " compose -p " + quote(stack)
-
-	return inSequence(project+" ps -a", project+" stats --no-stream")
-}
-
-// DescribeContainer shows the resources a container uses, then everything docker knows about it.
-func DescribeContainer(docker, container string) string {
-	return inSequence(docker+" stats --no-stream "+quote(container), docker+" inspect "+quote(container))
-}
-
 // ContainerShell is the command that opens a shell in a container, for Interactive:
 // bash if the image has it, else sh. docker: see StackLogs.
 func ContainerShell(docker, container string) string {
 	return fmt.Sprintf("%s exec -it %s sh -c %s", docker, quote(container),
 		quote("command -v bash >/dev/null && exec bash || exec sh"))
 }
-
-// inSequence runs commands one after the other, a blank line between their outputs.
-func inSequence(cmds ...string) string { return strings.Join(cmds, "; echo; ") }
 
 // Interactive is ssh running remote on h with the user's terminal, or with remote
 // "", a login shell. The caller hands it the terminal.

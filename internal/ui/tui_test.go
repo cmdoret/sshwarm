@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -51,18 +52,26 @@ func (s *session) keys(keys ...string) {
 
 // logs types a key that opens or restarts a log stream, and reads the stream to its end.
 func (s *session) logs(key string) {
-	m, cmd := s.m.Update(keyMsg(key))
+	var cmd tea.Cmd
 
+	s.m, cmd = s.m.Update(keyMsg(key))
+	s.read(cmd)
+}
+
+// read runs cmd, a stream's, until its end.
+func (s *session) read(cmd tea.Cmd) {
 	for cmd != nil {
 		msg := cmd()
-		m, cmd = m.Update(msg)
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			msg = streamOf(batch)
+		}
+
+		s.m, cmd = s.m.Update(msg)
 
 		if l, ok := msg.(logLinesMsg); ok && l.done {
 			break
 		}
 	}
-
-	s.m = m
 }
 
 // expect checks that the screen shows each of want, and fills the window exactly:
@@ -84,6 +93,22 @@ func (s *session) expect(want ...string) {
 	if w := lipgloss.Width(v); w > s.m.(model).width {
 		s.t.Errorf("view is %d columns, wider than the window:\n%s", w, v)
 	}
+}
+
+// streamOf runs a batch's commands until one brings a stream's lines: a wait's first
+// batch also holds the spinner's tick, which is left out.
+func streamOf(batch tea.BatchMsg) tea.Msg {
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+
+		if msg, ok := c().(logLinesMsg); ok {
+			return msg
+		}
+	}
+
+	return nil
 }
 
 func (s *session) top() screen { return s.m.(model).top() }
@@ -292,15 +317,16 @@ func TestActions(t *testing.T) {
 		t.Errorf("machine shell: %q", shell)
 	}
 
-	// d on a machine: what it is, its CPUs and what uses them, memory, disks.
+	// d on a machine: what it is, its CPUs and what uses them, memory, disks. This
+	// fake ssh's echo is no description: it shows as it came.
 	s.logs("d")
-	s.expect("app-node-argiope › describe", "hostnamectl", "lscpu", "top -b -n 2", "df -h")
+	s.expect("app-node-argiope › describe", "lscpu", "XDG_CONFIG_HOME=/nonexistent", "/proc/meminfo")
 	s.keys("esc")
 
 	// d on the failed unit: its status, nothing to follow.
 	s.keys("enter")
 	s.logs("d")
-	s.expect("app-node-argiope › describe broken.service", `ran: timeout 30 sh -c 'systemctl status --no-pager '\''broken.service'\'' || true'`)
+	s.expect("app-node-argiope › describe broken.service", "--timestamp=unix", "Id,Description,ActiveState", `'\''broken.service'\''`)
 
 	if strings.Contains(s.m.View(), "s follow") {
 		t.Error("a description offers to follow")
@@ -315,7 +341,7 @@ func TestActions(t *testing.T) {
 	// A stack, then a container: their commands run in one shell, under one timeout.
 	s.keys("esc", "tab")
 	s.logs("d")
-	s.expect("describe stack cook", `ran: timeout 30 sh -c 'sudo -n docker compose -p '\''cook'\'' ps -a; echo; sudo -n docker compose -p '\''cook'\'' stats --no-stream'`)
+	s.expect("describe stack cook", `ran: timeout 30 sh -c 'echo '\''### cpus'\''; nproc;`, "sudo -n docker ps -a --filter", "sudo -n docker stats --no-stream")
 
 	s.keys("esc", "enter")
 	s.logs("d")
@@ -342,4 +368,102 @@ func TestActions(t *testing.T) {
 	s.expect("enter logs • d describe • s shell", "…")
 	s.keys(":", "machines", "enter")
 	s.expect("MACHINE")
+}
+
+// A description shows as a card once all its output is in, opening at its top; v
+// shows the output as it came, and r describes again.
+func TestCard(t *testing.T) {
+	r := fixture(t)
+	runs := t.TempDir() + "/runs"
+	t.Setenv("RUNS", runs)
+	fakeBin(t, "ssh", `echo >> "$RUNS"; cat ../swarm/testdata/container.describe`)
+
+	s := start(t, r)
+	s.keys("enter", "shift+tab") // the containers tab
+
+	var cmd tea.Cmd
+	s.m, cmd = s.m.Update(keyMsg("d"))
+	s.expect("loading…")
+	s.read(cmd)
+
+	s.expect("Container", "demo-web-1", "running · health unhealthy", "v raw")
+
+	if v := s.m.View(); !strings.Contains(v, "  0%") {
+		t.Errorf("a card doesn't open at its top:\n%s", v)
+	}
+
+	s.keys("G")
+	s.expect("Environment (values hidden)", "DB_PASSWORD")
+
+	if strings.Contains(s.m.View(), "hunter2") {
+		t.Error("a card shows an environment value")
+	}
+
+	s.keys("v")
+	s.expect(`"Id": "044c2818`, "v card")
+
+	s.keys("v")
+	s.logs("r")
+	s.expect("running · health unhealthy", "r refresh", "refreshed ")
+
+	if n, _ := os.ReadFile(runs); len(n) != 2 {
+		t.Errorf("described %d times, want 2: r didn't run it again", len(n))
+	}
+
+	// In a while, it describes again by itself, the last card showing meanwhile.
+	card := s.top().(*text)
+	s.m, cmd = s.m.Update(redescribeMsg{card, card.runs})
+	s.expect("running · health unhealthy", s.m.(model).spin.View()+" refreshing")
+
+	if _, tick := s.m.Update(spinner.TickMsg{}); tick == nil {
+		t.Error("no spinner while describing")
+	}
+
+	s.read(cmd)
+	s.expect("refreshed ")
+
+	if _, tick := s.m.Update(spinner.TickMsg{}); tick != nil {
+		t.Error("the spinner turns after describing")
+	}
+
+	if n, _ := os.ReadFile(runs); len(n) != 3 {
+		t.Errorf("described %d times, want 3: it didn't refresh", len(n))
+	}
+
+	// A refresh due before r, or for a closed card, doesn't run.
+	if _, cmd := s.m.Update(redescribeMsg{card, card.runs - 1}); cmd != nil {
+		t.Error("a stale refresh ran")
+	}
+
+	s.keys("esc")
+
+	if _, cmd := s.m.Update(redescribeMsg{card, card.runs}); cmd != nil {
+		t.Error("a closed card refreshed")
+	}
+}
+
+// In a narrow window, a card fits it, cutting long lines; w makes it as wide as its
+// content, to scroll left and right.
+func TestCardScroll(t *testing.T) {
+	r := fixture(t)
+	fakeBin(t, "ssh", "cat ../swarm/testdata/unit.describe")
+
+	s := start(t, r)
+	s.resize(60)
+	s.keys("enter")
+	s.logs("d")
+
+	// The title gives way to the status, rather than the status to the window's edge.
+	s.expect("Recent logs", "w full width", "refreshed ", "─╮")
+
+	if strings.Contains(s.m.View(), "INVALIDARGUMENT") {
+		t.Error("a long line fits a narrow window")
+	}
+
+	s.keys("w", "l", "l", "l", "l", "l", "l", "l", "l")
+	s.expect("status=2/INVALIDARGUMENT", "w fit")
+
+	// Back to fitting the window: from its left edge again.
+	s.keys("w")
+	s.expect("  Name          backup.service")
 }

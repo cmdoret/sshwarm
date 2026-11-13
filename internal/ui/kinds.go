@@ -24,6 +24,7 @@ type kind struct {
 	logs   func(r swarm.Report, key string) (title, cmd string) // nil: no logs
 
 	describe func(r swarm.Report, key string) (title, cmd string) // nil: nothing to describe
+	card     cardFunc                                             // draws describe's output
 	shell    func(r swarm.Report, key string) (remote string)     // "": a login shell; nil: no shell
 }
 
@@ -67,6 +68,7 @@ var machines = &kind{
 	enter:    func(m *model, host int, _ string) tea.Cmd { return m.push(newTable(services, host, "")) },
 	shell:    func(swarm.Report, string) string { return "" },
 	describe: func(swarm.Report, string) (string, string) { return "describe", swarm.DescribeMachine() },
+	card:     machineCard,
 }
 
 // machineTitles head the machines table: `sshwarm status` prints all but PROBLEMS.
@@ -141,6 +143,7 @@ var services = &kind{
 	describe: func(_ swarm.Report, unit string) (string, string) {
 		return "describe " + unit, swarm.DescribeUnit(unit)
 	},
+	card: unitCard,
 }
 
 // serviceRows lists a machine's interesting units, failed first; with m.all, every
@@ -184,20 +187,29 @@ func unitRow(r swarm.Report, u swarm.Unit) row {
 		result.tone = bad
 	}
 
-	cells := func(state tone) []cell {
-		return []cell{dot(state, u.Name), {text: u.Active, tone: state}, {text: u.Sub}, result, {text: age}, {text: u.Description}}
+	state := unitTone(u.Active)
+	line := row{key: u.Name, cells: []cell{dot(state, u.Name), {text: u.Active, tone: state}, {text: u.Sub}, result, {text: age}, {text: u.Description}}}
+
+	if state == bad || state == dim { // the whole row: failed stands out, inactive fades
+		line.tone = state
 	}
 
-	switch u.Active {
+	return line
+}
+
+// unitTone rates a unit by its active state: failed is bad, changing is a warning,
+// inactive is there, but nothing to see.
+func unitTone(active string) tone {
+	switch active {
 	case "failed":
-		return row{tone: bad, cells: cells(bad), key: u.Name}
+		return bad
 	case "activating", "deactivating", "reloading", "refreshing":
-		return row{cells: cells(warn), key: u.Name}
+		return warn
 	case "active":
-		return row{cells: cells(good), key: u.Name}
+		return good
 	}
 
-	return row{tone: dim, cells: cells(dim), key: u.Name} // inactive: there, but nothing to see
+	return dim
 }
 
 // --- stacks and containers --------------------------------------------------
@@ -221,6 +233,7 @@ var stacks = &kind{
 	describe: func(r swarm.Report, stack string) (string, string) {
 		return "describe stack " + stack, swarm.DescribeStack(r.Docker, stack)
 	},
+	card: stackCard,
 }
 
 // containers lists a machine's compose containers, or one stack's.
@@ -249,6 +262,7 @@ var containers = &kind{
 	describe: func(r swarm.Report, name string) (string, string) {
 		return "describe container " + name, swarm.DescribeContainer(r.Docker, name)
 	},
+	card:  containerCard,
 	shell: func(r swarm.Report, name string) string { return swarm.ContainerShell(r.Docker, name) },
 }
 

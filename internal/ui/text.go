@@ -37,7 +37,7 @@ type logLinesMsg struct {
 }
 
 // text is a screen showing a remote command's output: logs, as a stream it can
-// follow, or a description.
+// follow, or a description, drawn as a card once all of it is in.
 type text struct {
 	title  string // after the machine's name: a unit, "stack db", "describe web-1"...
 	host   swarm.Host
@@ -46,13 +46,16 @@ type text struct {
 	ch     <-chan string // the current stream, nil if none
 	cancel context.CancelFunc
 
-	canFollow          bool // logs can; a description can't
-	follow, wrap, full bool // full: no frame or help line
+	card               cardFunc  // a description's; nil for logs, which can be followed instead
+	runs               int       // of the command: a refresh only follows the latest
+	refreshed          time.Time // when the last run ended
+	raw                bool      // shows a description's output as it came, not its card
+	follow, wrap, full bool      // full: no frame or help line
 	pager              viewport.Model
 }
 
-func newText(title string, h swarm.Host, cmd string, canFollow bool) *text {
-	t := &text{title: title, host: h, cmd: cmd, canFollow: canFollow, wrap: true, pager: viewport.New(0, 0)}
+func newText(title string, h swarm.Host, cmd string, card cardFunc) *text {
+	t := &text{title: title, host: h, cmd: cmd, card: card, wrap: true, pager: viewport.New(0, 0)}
 	t.pager.SetHorizontalStep(8) // left and right, once lines don't wrap
 
 	return t
@@ -62,10 +65,17 @@ func (t *text) open(m *model) tea.Cmd { return t.start(m.ctx, false) }
 
 // start (re)runs the command, following its output or not.
 func (t *text) start(ctx context.Context, follow bool) tea.Cmd {
+	again := t.card != nil && len(t.lines) > 0 // a description stays, where it was scrolled, until the next is in
+
 	t.stop()
 	ctx, t.cancel = context.WithCancel(ctx)
 	t.follow = follow
-	t.pager.SetContent("loading…")
+	t.runs++
+
+	if !again {
+		t.pager.SetContent("loading…")
+	}
+
 	t.ch = swarm.Stream(ctx, t.host, t.cmd, follow)
 
 	return waitLog(t.ch)
@@ -93,9 +103,13 @@ func (t *text) add(msg logLinesMsg) tea.Cmd {
 		t.lines = append(t.lines, "[stream ended]")
 	}
 
+	if msg.done {
+		t.ch, t.refreshed = nil, time.Now() // no stream any more
+	}
+
 	t.setContent()
 
-	if bottom {
+	if bottom && t.card == nil { // logs follow their end; a description opens at its top
 		t.pager.GotoBottom()
 	}
 
@@ -106,10 +120,29 @@ func (t *text) add(msg logLinesMsg) tea.Cmd {
 	return waitLog(t.ch)
 }
 
-// setContent wraps long lines to the window, unless wrapping is off: then left and
-// right scroll.
+// setContent draws a description's card once all its output is in, or else wraps
+// long lines to the window. Without wrapping, a card is as wide as its content, and
+// lines that are wider than the window scroll left and right.
 func (t *text) setContent() {
 	content := strings.Join(t.lines, "\n")
+
+	if t.showsCard() {
+		if t.ch != nil {
+			return // still "loading…"
+		}
+
+		width := t.pager.Width
+		if !t.wrap {
+			width = 0
+		}
+
+		if drawn, err := t.card(content, width); err == nil {
+			t.pager.SetContent(drawn)
+
+			return
+		}
+	}
+
 	if t.wrap {
 		content = lipgloss.NewStyle().Width(t.pager.Width).Render(content)
 	}
@@ -133,13 +166,22 @@ func (t *text) key(m *model, k tea.KeyMsg) tea.Cmd {
 	switch k.String() {
 	case "esc":
 		m.pop()
+	case "r": // runs the command again: a description's latest state, or the latest logs
+		return t.start(m.ctx, t.follow)
 	case "s":
-		if t.canFollow {
+		if t.card == nil {
 			return t.start(m.ctx, !t.follow)
+		}
+	case "v":
+		if t.card != nil {
+			t.raw = !t.raw
+			t.setContent()
+			t.pager.GotoTop()
 		}
 	case "w":
 		t.wrap = !t.wrap
 		t.setContent()
+		t.pager.SetXOffset(0) // wrapped, no line is wider than the window: show them whole
 	case "f":
 		t.full = !t.full
 		t.resize(m.width, m.height)
@@ -168,19 +210,58 @@ func (t *text) view(m *model) string {
 	}
 
 	title := crumbs(t.host.Name, t.title)
-	status := dimStyle.Render(fmt.Sprintf("%3.f%%", t.pager.ScrollPercent()*100))
 
-	help := "w wrap · f fullscreen · c copy · g/G top/bottom · esc back · q quit"
+	status := dimStyle.Render(fmt.Sprintf("%3.f%%", t.pager.ScrollPercent()*100))
+	if t.card != nil && !t.refreshed.IsZero() { // a description refreshes: say how fresh it is
+		when := dimStyle.Render("refreshed " + t.refreshed.Format(time.TimeOnly))
+		if t.ch != nil {
+			when = m.spin.View() + dimStyle.Render(" refreshing")
+		}
+
+		status = when + dimStyle.Render(" · ") + status
+	}
+
+	wrap := "w wrap"
+
+	switch {
+	case t.showsCard() && t.wrap:
+		wrap = "w full width"
+	case t.showsCard():
+		wrap = "w fit"
+	}
+
+	help := wrap + " · f fullscreen · c copy · g/G top/bottom · r refresh · esc back · q quit"
 
 	switch {
 	case t.follow:
 		help = "s stop following · " + help
-	case t.canFollow:
+	case t.card == nil:
 		help = "s follow · " + help
+	case t.raw:
+		help = "v card · " + help
+	default:
+		help = "v raw · " + help
 	}
 
 	return m.frame(title, status, t.pager.View(), help)
 }
+
+// redescribeMsg asks a description's screen to run again, unless it's closed or ran
+// since, at r.
+type redescribeMsg struct {
+	t   *text
+	run int
+}
+
+// again describes again after a while, as tables refresh.
+func (t *text) again(after time.Duration) tea.Cmd {
+	msg := redescribeMsg{t, t.runs}
+
+	return tea.Tick(after, func(time.Time) tea.Msg { return msg })
+}
+
+// showsCard says whether the screen shows its output as a card, not as it came.
+func (t *text) showsCard() bool { return t.card != nil && !t.raw }
 
 // waitLog delivers the next lines of a stream, gathered for up to 50 ms, so a
 // busy stream doesn't re-render the screen for every line.
