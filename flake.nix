@@ -33,10 +33,11 @@
           baseTools = with pkgs; [
             go
             just
-            shellcheck
-            treefmt
             nixfmt
+            nushell
+            shellcheck
             shfmt
+            treefmt
           ];
           devTools = with pkgs; [
             prek
