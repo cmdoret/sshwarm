@@ -20,7 +20,7 @@
           version = "0.1.0";
           src = self;
           # After changing Go dependencies: nix build prints the new hash.
-          vendorHash = "sha256-OAWTxe4SpQsQLJpz6y1QAiJq2hvNkwjAHP2Dj99z8qI=";
+          vendorHash = "sha256-CgG2p1sMMluqwmwGB4eApyUFpvgDyRITYu1zV098wH0=";
           meta.mainProgram = "sshwarm";
         };
       });
