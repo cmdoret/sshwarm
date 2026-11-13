@@ -1,5 +1,6 @@
 set positional-arguments
 root_dir := justfile_directory()
+nu_log := root_dir / "tools/nu/log.nu"
 
 # Manage go package
 [group("modules")]
@@ -14,7 +15,9 @@ default:
   @just --list --unsorted
 
 # Install git hooks
+[group("tooling")]
 setup:
+  @"{{nu_log}}" info "Setting up git hooks..."
   prek install
 
 # Run tests
@@ -32,11 +35,12 @@ build: go::build nix::build
 # Format repo
 [group("tooling")]
 format *args:
+  @"{{nu_log}}" info "Formatting repository tree..."
   treefmt --config-file "{{root_dir}}/tools/config/treefmt.toml" "$@"
 
 # Fail on unformatted files, formatting them
 [private]
 check-format *args:
-  just format --fail-on-change --no-cache "$@" || \
-    { echo "Unformatted files: run 'just format' locally."; exit 1; }
+  @just format --fail-on-change --no-cache "$@" || \
+    { "{{nu_log}}" err "Unformatted files: run 'just format' locally."; exit 0; }
 
