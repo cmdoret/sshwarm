@@ -60,6 +60,8 @@ func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
 	switch k.String() {
 	case "esc":
 		m.pop()
+	case "r":
+		return m.refresh()
 	case "tab":
 		t.nextTab(m, 1)
 	case "shift+tab":
@@ -72,9 +74,9 @@ func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
 	case "/":
 		return t.filter.Focus()
 	case "l":
-		return t.show(m, t.kind.logs, true)
+		return t.show(m, t.kind.logs, nil)
 	case "d":
-		return t.show(m, t.kind.describe, false)
+		return t.show(m, t.kind.describe, t.kind.card)
 	case "s":
 		if host, key, ok := t.selected(m); ok && t.kind.shell != nil {
 			r := m.reports[host]
@@ -83,7 +85,7 @@ func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
 		}
 	case "enter":
 		if t.kind.enter == nil {
-			return t.show(m, t.kind.logs, true)
+			return t.show(m, t.kind.logs, nil)
 		}
 
 		if host, key, ok := t.selected(m); ok {
@@ -131,9 +133,9 @@ func (t *table) selected(m *model) (host int, key string, ok bool) {
 }
 
 // show runs the command that command gives for the row under the cursor, and shows
-// its output over the table: logs, which can be followed, or a description. A nil
+// its output over the table: logs, or with a card to draw it, a description. A nil
 // command means the kind has none.
-func (t *table) show(m *model, command func(swarm.Report, string) (string, string), canFollow bool) tea.Cmd {
+func (t *table) show(m *model, command func(swarm.Report, string) (string, string), card cardFunc) tea.Cmd {
 	host, key, ok := t.selected(m)
 	if !ok || command == nil {
 		return nil
@@ -142,7 +144,7 @@ func (t *table) show(m *model, command func(swarm.Report, string) (string, strin
 	r := m.reports[host]
 	title, cmd := command(r, key)
 
-	return m.push(newText(title, r.Host, cmd, canFollow))
+	return m.push(newText(title, r.Host, cmd, card))
 }
 
 // nextTab shows the machine's next kind, or with step -1 the previous one, if it

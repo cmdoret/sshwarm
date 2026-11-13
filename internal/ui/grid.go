@@ -103,10 +103,10 @@ func (g *grid) key(k tea.KeyMsg) {
 	g.clamp()
 }
 
-// widths fits each column to its widest cell, up to a third of the grid so that
-// one long name can't push the others out. The last column takes the rest.
-func (g grid) widths() []int {
-	ws := make([]int, len(g.titles))
+// natural is the width of each column's widest cell, and the grid's with them all
+// and their padding.
+func (g grid) natural() (ws []int, total int) {
+	ws = make([]int, len(g.titles))
 	for i, t := range g.titles {
 		ws[i] = runewidth.StringWidth(t)
 	}
@@ -117,7 +117,27 @@ func (g grid) widths() []int {
 		}
 	}
 
+	total = 2 * len(ws) // every column's padding
+	for _, w := range ws {
+		total += w
+	}
+
+	return ws, total
+}
+
+// widths fits each column to its widest cell, the last taking the rest. If they
+// don't all fit, a column gets up to a third of the grid, so that one long name
+// can't push the others out.
+func (g grid) widths() []int {
+	ws, total := g.natural()
 	last := len(ws) - 1
+
+	if total <= g.width {
+		ws[last] += g.width - total
+
+		return ws
+	}
+
 	rest := g.width - 2*len(ws) // every column's padding
 
 	for i := range ws[:last] {
