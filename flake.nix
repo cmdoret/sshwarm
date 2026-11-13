@@ -12,6 +12,7 @@
         "x86_64-darwin"
         "aarch64-darwin"
       ];
+
     in
     {
       packages = forAllSystems (system: {
@@ -25,13 +26,31 @@
         };
       });
 
-      devShells = forAllSystems (system: {
-        default = nixpkgs.legacyPackages.${system}.mkShell {
-          packages = with nixpkgs.legacyPackages.${system}; [
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+
+          baseTools = with pkgs; [
             go
             just
+            shellcheck
+            treefmt
+            nixfmt
+            shfmt
           ];
-        };
-      });
+          devTools = with pkgs; [
+            prek
+          ];
+        in
+        {
+          ci = pkgs.mkShell { packages = baseTools; };
+
+          default = pkgs.mkShell {
+            packages = baseTools ++ devTools;
+            shellHook = "just setup";
+          };
+        }
+      );
     };
 }
