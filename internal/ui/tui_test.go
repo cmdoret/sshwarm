@@ -111,6 +111,19 @@ func streamOf(batch tea.BatchMsg) tea.Msg {
 	return nil
 }
 
+// ran checks that the text screen on top runs a command with each of want. Unlike
+// the screen, the command doesn't wrap with the window.
+func (s *session) ran(want ...string) {
+	s.t.Helper()
+
+	cmd := s.top().(*text).cmd
+	for _, w := range want {
+		if !strings.Contains(cmd, w) {
+			s.t.Errorf("missing %q in the command: %s", w, cmd)
+		}
+	}
+}
+
 func (s *session) top() screen { return s.m.(model).top() }
 
 func keyMsg(k string) tea.KeyMsg {
@@ -134,7 +147,7 @@ func TestTUI(t *testing.T) {
 	fakeBin(t, "ssh", `
 case "$*" in *-tt*) echo "with a terminal" ;; esac
 eval remote=\${$#}
-echo "ran: $remote"
+printf 'ran: %s\n' "$remote"
 echo line-two
 `)
 
@@ -214,7 +227,7 @@ echo line-two
 func TestNavigation(t *testing.T) {
 	r := fixture(t)
 	r.Docker = "docker" // the logs use the docker command the probe found
-	fakeBin(t, "ssh", `eval remote=\${$#}; echo "ran: $remote"; echo "`+strings.Repeat("y", 150)+` ENDOFLONGLINE"`)
+	fakeBin(t, "ssh", `eval remote=\${$#}; printf 'ran: %s\n' "$remote"; echo "`+strings.Repeat("y", 150)+` ENDOFLONGLINE"`)
 
 	var copied string
 
@@ -296,7 +309,7 @@ func TestNavigation(t *testing.T) {
 // machine or in a container.
 func TestActions(t *testing.T) {
 	r := fixture(t)
-	fakeBin(t, "ssh", `eval remote=\${$#}; echo "ran: $remote"`)
+	fakeBin(t, "ssh", `eval remote=\${$#}; printf 'ran: %s\n' "$remote"`)
 
 	var shell []string
 
@@ -320,13 +333,15 @@ func TestActions(t *testing.T) {
 	// d on a machine: what it is, its CPUs and what uses them, memory, disks. This
 	// fake ssh's echo is no description: it shows as it came.
 	s.logs("d")
-	s.expect("app-node-argiope › describe", "lscpu", "XDG_CONFIG_HOME=/nonexistent", "/proc/meminfo")
+	s.expect("app-node-argiope › describe")
+	s.ran("lscpu", "XDG_CONFIG_HOME=/nonexistent", "/proc/meminfo")
 	s.keys("esc")
 
 	// d on the failed unit: its status, nothing to follow.
 	s.keys("enter")
 	s.logs("d")
-	s.expect("app-node-argiope › describe broken.service", "--timestamp=unix", "Id,Description,ActiveState", `'\''broken.service'\''`)
+	s.expect("app-node-argiope › describe broken.service")
+	s.ran("systemctl show --timestamp=unix -p Id,Description,ActiveState", "journalctl -u 'broken.service' -n 10")
 
 	if strings.Contains(s.m.View(), "s follow") {
 		t.Error("a description offers to follow")
@@ -341,11 +356,13 @@ func TestActions(t *testing.T) {
 	// A stack, then a container: their commands run in one shell, under one timeout.
 	s.keys("esc", "tab")
 	s.logs("d")
-	s.expect("describe stack cook", `ran: timeout 30 sh -c 'echo '\''### cpus'\''; nproc;`, "sudo -n docker ps -a --filter", "sudo -n docker stats --no-stream")
+	s.expect("describe stack cook", "ran: timeout 30 sh -c 'echo")
+	s.ran("echo '### cpus'; nproc", "sudo -n docker ps -a --filter 'label=com.docker.compose.project=cook'", "sudo -n docker stats --no-stream")
 
 	s.keys("esc", "enter")
 	s.logs("d")
-	s.expect("describe container cook-cookcli-1", `sudo -n docker inspect '\''cook-cookcli-1'\'''`)
+	s.expect("describe container cook-cookcli-1")
+	s.ran("sudo -n docker inspect 'cook-cookcli-1'")
 
 	// s in a container: docker exec, then the TUI says how the shell ended.
 	s.keys("esc")
