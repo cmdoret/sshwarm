@@ -17,7 +17,7 @@
       packages = forAllSystems (system: {
         default = nixpkgs.legacyPackages.${system}.buildGoModule {
           pname = "sshwarm";
-          version = "0.1.0";
+          version = "1.0.0";
           src = self;
           # After changing Go dependencies: nix build prints the new hash.
           vendorHash = "sha256-CgG2p1sMMluqwmwGB4eApyUFpvgDyRITYu1zV098wH0=";
