@@ -8,6 +8,9 @@ mod go 'tools/just/go.just'
 # Manage nix outputs
 [group("modules")]
 mod nix 'tools/just/nix.just'
+# Manage release binaries
+[group("modules")]
+mod release 'tools/just/release.just'
 # Manage container images
 [group("modules")]
 mod image 'tools/just/image.just'
