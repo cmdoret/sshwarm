@@ -27,6 +27,8 @@ Or run directly from the flake using nix:
 nix run github:cmdoret/sshwarm -- --hosts hosts.toml
 ```
 
+Or download a binary from the [releases](https://github.com/cmdoret/sshwarm/releases).
+
 ## Requirements
 
 Linux machines with systemd and bash, reachable over ssh without a password prompt
@@ -78,3 +80,17 @@ flowchart LR
     sw --> ui["browser:<br>machines, services,<br>stacks, containers"]
     ui -. "logs, describe, shell,<br>on demand" .-> m
 ```
+
+## Docker images
+
+Container images are also available, but they suffer from a few usability limitations:
+
+* nix is not included in the image, so you can only use `hosts.toml`
+* `hosts.toml` must fully define the hosts, as ssh refuses a mounted `~/..ssh/config`.
+
+```sh
+docker run --rm -it -v ./hosts.toml:/hosts.toml:ro \
+  -v ~/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro -v ~/.ssh/known_hosts:/root/.ssh/known_hosts:ro \
+  ghcr.io/cmdoret/sshwarm --hosts /hosts.toml
+```
+
