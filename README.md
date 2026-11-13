@@ -29,19 +29,23 @@ nix run github:cmdoret/sshwarm -- --hosts hosts.toml
 
 ## Requirements
 
-- `ssh`, and the machines listed in a TOML hosts file, or in a flake's `deploy.nodes`
-  as for [deploy-rs](https://github.com/serokell/deploy-rs) (then also `nix`).
-- Linux machines with systemd and bash, reachable over ssh without a password prompt
-  (keys or agent), where:
-    - ssh user in the `systemd-journal` group.
-    - ssh user can run docker without password (either rootless or with sudo).
+Linux machines with systemd and bash, reachable over ssh without a password prompt
+(keys or agent), where the ssh user:
+
+- is in the `systemd-journal` group.
+- can run docker without password (either rootless or with passwordless sudo).
 
 ## Use
 
 ```sh
-sshwarm --hosts hosts.toml         # browse: machines, services, stacks, containers, logs; :ctr web-1 jumps
-sshwarm --flake ./nix status web   # the table, for the machines whose name contains "web"
+sshwarm --hosts hosts.toml
 ```
+
+### Hosts file
+
+Only `name` is required. ssh looks up `host`, or else `name`, in `~/.ssh/config` for
+anything not set in the file, like ports or jump hosts. Set `SSHWARM_HOSTS` or
+`SSHWARM_FLAKE` to skip the flag. See `sshwarm help` for more.
 
 ```toml
 # hosts.toml: one [[host]] per machine
@@ -55,9 +59,14 @@ user = "deploy"
 key  = "~/.ssh/web"
 ```
 
-Only `name` is required. ssh looks up `host`, or else `name`, in `~/.ssh/config` for
-anything not set in the file, like ports or jump hosts. Set `SSHWARM_HOSTS` or
-`SSHWARM_FLAKE` to skip the flag. The rest: `sshwarm help`.
+### Nix flake
+
+Instead of a hosts file, you may provide a Nix flake exposing `deploy.nodes` in its outputs.
+See [deploy-rs](https://github.com/serokell/deploy-rs#overall-usage) for more information.
+
+```sh
+sshwarm --flake ./nix
+```
 
 ## How it works
 
