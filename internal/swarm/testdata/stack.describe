@@ -1,0 +1,7 @@
+### cpus
+8
+### ps
+demo-job-1	job	exited	Exited (1) 7 seconds ago	
+demo-web-1	web	running	Up 8 seconds (unhealthy)	127.0.0.1:18080->80/tcp
+### stats
+demo-web-1	6.86%	0.01%	1.73MiB / 15.24GiB
