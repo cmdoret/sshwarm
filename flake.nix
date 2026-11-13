@@ -22,9 +22,9 @@
           # The binary for the current system
           sshwarm = pkgs.callPackage ./tools/nix/sshwarm.nix { src = self; };
 
-          # The binary for another OS and architecture, e.g. sshwarmFor "linux" "arm64"
+          # The binary for another OS and architecture
           sshwarmFor = goos: goarch: pkgs.callPackage ./tools/nix/cross.nix { inherit sshwarm goos goarch; };
-          # The docker image for a Linux architecture, e.g. imageFor "arm64"
+          # The docker image for a Linux architecture
           imageFor = goarch: pkgs.callPackage ./tools/nix/image.nix { inherit nixpkgs sshwarmFor goarch; };
         in
         {
