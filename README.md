@@ -6,7 +6,7 @@
 
 <p align="center"><b><a href="https://k9scli.io">k9s</a> for ssh.</b> Your Linux machines, their services, containers and logs, in one terminal.</p>
 
-<p align="center"><img src="assets/sshwarm.gif" alt="" width="720"></p>
+<p align="center"><a href="https://asciinema.org/a/jHeN9sWGwwmMRVq2" target="_blank"><img src="assets/sshwarm.gif" alt="" width="720"></a></p>
 
 Tired of ssh-ing into box after box to find out what's deployed where, which service died
 overnight and which container is crash-looping? **sshwarm** shows the whole swarm at a
