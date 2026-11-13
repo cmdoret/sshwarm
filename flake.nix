@@ -3,6 +3,7 @@
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
+  # The outputs: their recipes are in ./tools/nix.
   outputs =
     { self, nixpkgs }:
     let
@@ -12,45 +13,33 @@
         "x86_64-darwin"
         "aarch64-darwin"
       ];
-
     in
     {
-      packages = forAllSystems (system: {
-        default = nixpkgs.legacyPackages.${system}.buildGoModule {
-          pname = "sshwarm";
-          version = "1.0.0";
-          src = self;
-          vendorHash = builtins.readFile ./tools/nix/sshwarm-hash.txt;
-          meta.mainProgram = "sshwarm";
-        };
-      });
-
-      devShells = forAllSystems (
+      packages = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          # The binary for the current system
+          sshwarm = pkgs.callPackage ./tools/nix/sshwarm.nix { src = self; };
 
-          baseTools = with pkgs; [
-            go
-            just
-            nixfmt
-            nushell
-            shellcheck
-            shfmt
-            treefmt
-          ];
-          devTools = with pkgs; [
-            prek
-          ];
+          # The binary for another OS and architecture, e.g. sshwarmFor "linux" "arm64"
+          sshwarmFor = goos: goarch: pkgs.callPackage ./tools/nix/cross.nix { inherit sshwarm goos goarch; };
+          # The docker image for a Linux architecture, e.g. imageFor "arm64"
+          imageFor = goarch: pkgs.callPackage ./tools/nix/image.nix { inherit nixpkgs sshwarmFor goarch; };
         in
         {
-          ci = pkgs.mkShell { packages = baseTools; };
-
-          default = pkgs.mkShell {
-            packages = baseTools ++ devTools;
-            shellHook = "just setup";
-          };
+          default = sshwarm;
+          # A directory of the release's binaries: sshwarm-linux-amd64, ...
+          release = pkgs.callPackage ./tools/nix/release.nix { inherit sshwarmFor; };
         }
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          image-amd64 = imageFor "amd64";
+          image-arm64 = imageFor "arm64";
+        }
+      );
+
+      devShells = forAllSystems (
+        system: import ./tools/nix/shells.nix { pkgs = nixpkgs.legacyPackages.${system}; }
       );
     };
 }
