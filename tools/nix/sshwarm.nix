@@ -5,7 +5,7 @@
   src,
 }:
 let
-  version = "1.1.0";
+  version = "1.1.1";
   rev = src.rev or src.dirtyRev or "unknown";
 in
 buildGoModule {
