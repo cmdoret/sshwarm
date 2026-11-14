@@ -411,9 +411,9 @@ func TestSort(t *testing.T) {
 	order("immich_redis", "vert", "utils-init-volumes-1", "immich_server", "cook-cookcli-1")
 }
 
-// u, ctrl+k and R start, stop and restart a unit, a stack or a container, once
-// confirmed with y: in the background, saying how it went, then probing again. Any
-// other key cancels. Read-only, there are no actions at all.
+// u, ctrl+k and R start, stop and restart a unit, a stack or a container, and R
+// reboots a machine, once confirmed with y: in the background, saying how it went,
+// then probing again. Any other key cancels. Read-only, there are no actions at all.
 func TestStartStop(t *testing.T) {
 	r := fixture(t)
 	runs := t.TempDir() + "/runs"
@@ -446,12 +446,19 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 		}
 	}
 
-	// Machines have no actions.
-	s.keys("R")
+	// A machine only reboots.
+	s.expect("s ssh • R reboot")
+	s.keys("u", "ctrl+k")
 
 	if s.m.(model).confirm != nil {
-		t.Error("an action on a machine")
+		t.Error("a machine started or stopped")
 	}
+
+	s.keys("R")
+	s.expect("reboot app-node-argiope? y/N")
+	s.keys("n")
+	act("R")
+	s.expect("reboot app-node-argiope failed: sudo: a password is required")
 
 	// R on the failed unit asks first; another key cancels.
 	s.keys("enter", "R")
@@ -461,12 +468,12 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 
 	// Confirmed, it fails: why shows.
 	act("R")
-	s.expect("restart broken.service failed: sudo: a password is required")
+	s.expect("restart broken.service on app-node-argiope failed: sudo: a password is required")
 
 	// ctrl+k on a stack, u on a container.
 	s.keys("tab")
 	act("ctrl+k")
-	s.expect("stopped stack cook")
+	s.expect("stopped stack cook on app-node-argiope")
 
 	// The probe running when it ended may have looked before: another follows.
 	s.m, _ = s.m.Update(reportsMsg{r})
@@ -474,12 +481,13 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 	if m := s.m.(model); !m.refreshing || m.stale {
 		t.Error("no probe after the one running during the action")
 	}
+
 	s.keys("tab")
 	act("u")
-	s.expect("started container cook-cookcli-1")
+	s.expect("started container cook-cookcli-1 on app-node-argiope")
 
 	ran, _ := os.ReadFile(runs)
-	if want := swarm.UnitAction("restart", "broken.service") + "\nsudo -n docker compose -p 'cook' stop\nsudo -n docker start 'cook-cookcli-1'\n"; string(ran) != want {
+	if want := swarm.Reboot() + "\n" + swarm.UnitAction("restart", "broken.service") + "\nsudo -n docker compose -p 'cook' stop\nsudo -n docker start 'cook-cookcli-1'\n"; string(ran) != want {
 		t.Errorf("ran:\n%s\nwant:\n%s", ran, want)
 	}
 

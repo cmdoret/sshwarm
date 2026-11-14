@@ -57,7 +57,7 @@ func (t *table) resize(width, height int) {
 }
 
 func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
-	if a, ok := actions[k.String()]; ok {
+	if a, ok := actionKeys[k.String()]; ok {
 		t.ask(m, a)
 
 		return nil
@@ -148,11 +148,12 @@ func (t *table) selected(m *model) (host int, key string, ok bool) {
 	return slices.IndexFunc(m.reports, func(r swarm.Report) bool { return r.Host.Name == key }), key, true
 }
 
-// ask asks to confirm a on the row under the cursor, if its kind has actions. The
-// row is set now: a refresh could move another under the cursor before it's confirmed.
+// ask asks to confirm a on the row under the cursor, if its kind has such an action.
+// The row is set now: a refresh could move another under the cursor before it's
+// confirmed.
 func (t *table) ask(m *model, a action) {
 	host, key, ok := t.selected(m)
-	if !ok || t.kind.act == nil {
+	if !ok {
 		return
 	}
 
@@ -163,8 +164,13 @@ func (t *table) ask(m *model, a action) {
 	}
 
 	r := m.reports[host]
+
+	a = t.kind.act(r, a, key)
+	if a.cmd == "" {
+		return
+	}
+
 	a.host = r.Host
-	a.what, a.cmd = t.kind.act(r, a.verb, key)
 	m.confirm = &a
 }
 
@@ -234,8 +240,8 @@ func (t *table) view(m *model) string {
 	}
 
 	help := t.kind.help
-	if t.kind.act != nil && !m.readOnly {
-		help += " · " + actionsHelp
+	if !m.readOnly {
+		help += " · " + t.kind.actions
 	}
 
 	if t.grid.hidden() > 0 {

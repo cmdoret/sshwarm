@@ -25,29 +25,36 @@ type kind struct {
 
 	status, age int // the columns S and A sort on; 0 (the name) for none
 
-	describe func(r swarm.Report, key string) (title, cmd string)      // nil: nothing to describe
-	card     cardFunc                                                  // draws describe's output
-	shell    func(r swarm.Report, key string) (remote string)          // "": a login shell; nil: no shell
-	act      func(r swarm.Report, verb, key string) (what, cmd string) // start, stop, restart; nil: none
+	describe func(r swarm.Report, key string) (title, cmd string) // nil: nothing to describe
+	card     cardFunc                                             // draws describe's output
+	shell    func(r swarm.Report, key string) (remote string)     // "": a login shell; nil: no shell
+
+	// act says what a, asked for with its key, does to the row's thing, key: what and
+	// the command; or else, if the kind has no such action, no command.
+	act     func(r swarm.Report, a action, key string) action
+	actions string // the keys act takes, for the help line
 }
 
-// action is a start, stop or restart of what a row is about: asked for with its key,
-// then confirmed, then run.
+// action is a start, stop or restart (or reboot) of what a row is about: asked for
+// with its key, then confirmed, then run.
 type action struct {
 	verb, done string // "restart", "restarted"
-	what, cmd  string // once asked: "stack immich", and the command that does it
+	what, cmd  string // once asked: "stack immich on web-1", and the command that does it
 	host       swarm.Host
 }
 
-// actions are the keys that start, stop and restart, on the kinds that can (act).
-var actions = map[string]action{
+// actionKeys start, stop and restart what's under the cursor, if its kind can (act).
+var actionKeys = map[string]action{
 	"u":      {verb: "start", done: "started"}, // up
 	"ctrl+k": {verb: "stop", done: "stopped"},  // k9s's kill
 	"R":      {verb: "restart", done: "restarted"},
 }
 
-// actionsHelp is the actions' keys, for the help line.
-const actionsHelp = "u start · ^k stop · R restart"
+// rowActions is the action keys of what runs on a machine, for the help line.
+const rowActions = "u start · ^k stop · R restart"
+
+// on says where what is: on r's machine.
+func on(r swarm.Report, what string) string { return what + " on " + r.Host.Name }
 
 // kinds are the command bar's resources.
 var kinds = []*kind{machines, services, stacks, containers}
@@ -93,6 +100,14 @@ var machines = &kind{
 	shell:    func(swarm.Report, string) string { return "" },
 	describe: func(swarm.Report, string) (string, string) { return "describe", swarm.DescribeMachine() },
 	card:     machineCard,
+	act: func(r swarm.Report, a action, _ string) action {
+		if a.verb != "restart" { // can't be started over ssh, nor started again once stopped
+			return action{}
+		}
+
+		return action{verb: "reboot", done: "rebooting", what: r.Host.Name, cmd: swarm.Reboot()}
+	},
+	actions: "R reboot",
 }
 
 // machineTitles head the machines table: `sshwarm status` prints all but PROBLEMS.
@@ -168,9 +183,12 @@ var services = &kind{
 		return "describe " + unit, swarm.DescribeUnit(unit)
 	},
 	card: unitCard,
-	act: func(_ swarm.Report, verb, unit string) (string, string) {
-		return unit, swarm.UnitAction(verb, unit)
+	act: func(r swarm.Report, a action, unit string) action {
+		a.what, a.cmd = on(r, unit), swarm.UnitAction(a.verb, unit)
+
+		return a
 	},
+	actions: rowActions,
 }
 
 // serviceRows lists a machine's interesting units, failed first; with m.all, every
@@ -262,9 +280,12 @@ var stacks = &kind{
 		return "describe stack " + stack, swarm.DescribeStack(r.Docker, stack)
 	},
 	card: stackCard,
-	act: func(r swarm.Report, verb, stack string) (string, string) {
-		return "stack " + stack, swarm.StackAction(r.Docker, verb, stack)
+	act: func(r swarm.Report, a action, stack string) action {
+		a.what, a.cmd = on(r, "stack "+stack), swarm.StackAction(r.Docker, a.verb, stack)
+
+		return a
 	},
+	actions: rowActions,
 }
 
 // containers lists a machine's compose containers, or one stack's.
@@ -299,9 +320,12 @@ var containers = &kind{
 	},
 	card:  containerCard,
 	shell: func(r swarm.Report, name string) string { return swarm.ContainerShell(r.Docker, name) },
-	act: func(r swarm.Report, verb, name string) (string, string) {
-		return "container " + name, swarm.ContainerAction(r.Docker, verb, name)
+	act: func(r swarm.Report, a action, name string) action {
+		a.what, a.cmd = on(r, "container "+name), swarm.ContainerAction(r.Docker, a.verb, name)
+
+		return a
 	},
+	actions: rowActions,
 }
 
 func stackRow(r swarm.Report, s swarm.Stack) row {

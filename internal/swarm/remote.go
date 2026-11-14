@@ -72,15 +72,19 @@ func ContainerShell(docker, container string) string {
 		quote("command -v bash >/dev/null && exec bash || exec sh"))
 }
 
-// UnitAction is the command that starts, stops or restarts a systemd unit,
-// for Run: as root, directly, as sudo may not be installed; else through sudo,
-// which mustn't ask for a password: without a terminal, systemctl can't ask either.
-// Never both: a unit that fails to restart would restart twice. In sh, whatever the
-// user's shell.
-func UnitAction(verb, unit string) string {
-	systemctl := "systemctl " + verb + " " + quote(unit)
+// UnitAction is the command that starts, stops or restarts a systemd unit, for Run.
+func UnitAction(verb, unit string) string { return asRoot("systemctl " + verb + " " + quote(unit)) }
 
-	return "sh -c " + quote(`if [ "$(id -u)" = 0 ]; then `+systemctl+"; else sudo -n "+systemctl+"; fi")
+// Reboot is the command that reboots a machine, for Run. systemctl returns as soon as
+// the reboot is under way, so that ssh hears it ended before the machine goes down.
+func Reboot() string { return asRoot("systemctl reboot") }
+
+// asRoot runs cmd as root: directly if the user is root, as sudo may not be
+// installed; else through sudo, which mustn't ask for a password: without a
+// terminal, nothing can ask for one. Never both: a cmd that failed would run twice.
+// In sh, whatever the user's shell.
+func asRoot(cmd string) string {
+	return "sh -c " + quote(`if [ "$(id -u)" = 0 ]; then `+cmd+"; else sudo -n "+cmd+"; fi")
 }
 
 // StackAction is the command that starts, stops or restarts (verb) a compose

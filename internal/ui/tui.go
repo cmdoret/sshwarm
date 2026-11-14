@@ -484,7 +484,7 @@ func (m *model) bar() string {
 	case m.confirm != nil:
 		a := m.confirm
 
-		return toneStyles[warn].Render(fmt.Sprintf("%s %s on %s? y/N", a.verb, a.what, a.host.Name))
+		return toneStyles[warn].Render(fmt.Sprintf("%s %s? y/N", a.verb, a.what))
 	case m.command.Focused():
 		return m.command.View()
 	case m.flash != "":
