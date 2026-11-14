@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/cmdoret/sshwarm/internal/swarm"
+	"github.com/cmdoret/sshwarm/internal/testutil"
 )
 
 // session drives the TUI like a user: it types keys and checks the screens.
@@ -90,7 +91,7 @@ func (s *session) expect(want ...string) {
 		s.t.Errorf("view is %d lines, not the window's 30:\n%s", n, v)
 	}
 
-	if w := lipgloss.Width(v); w > s.m.(model).width {
+	if w := lipgloss.Width(v); w > s.model().width {
 		s.t.Errorf("view is %d columns, wider than the window:\n%s", w, v)
 	}
 }
@@ -116,7 +117,7 @@ func streamOf(batch tea.BatchMsg) tea.Msg {
 func (s *session) ran(want ...string) {
 	s.t.Helper()
 
-	cmd := s.top().(*text).cmd
+	cmd := s.text().cmd
 	for _, w := range want {
 		if !strings.Contains(cmd, w) {
 			s.t.Errorf("missing %q in the command: %s", w, cmd)
@@ -124,7 +125,37 @@ func (s *session) ran(want ...string) {
 	}
 }
 
-func (s *session) top() screen { return s.m.(model).top() }
+// The tests reach the TUI's state through these few helpers only, so that a change
+// of its structure changes them, not every test.
+
+// model is the TUI's state.
+func (s *session) model() model { return s.m.(model) }
+
+// table is the table screen on top.
+func (s *session) table() *table { return s.model().top().(*table) }
+
+// text is the text screen on top: logs or a description.
+func (s *session) text() *text { return s.model().top().(*text) }
+
+// rows lists the keys of the top table's rows, in order.
+func (s *session) rows() []string {
+	var keys []string
+	for _, r := range s.table().grid.rows {
+		keys = append(keys, r.key)
+	}
+
+	return keys
+}
+
+// selected is the key of the top table's row under the cursor.
+func (s *session) selected() string {
+	g := s.table().grid
+
+	return g.rows[g.cursor].key
+}
+
+// depth is how many screens are open, the machines' included.
+func (s *session) depth() int { return len(s.model().screens) }
 
 func keyMsg(k string) tea.KeyMsg {
 	switch k {
@@ -150,7 +181,7 @@ func keyMsg(k string) tea.KeyMsg {
 func TestTUI(t *testing.T) {
 	r := fixture(t)
 	// The logs' ssh: echo what it was asked to run.
-	fakeBin(t, "ssh", `
+	testutil.FakeBin(t, "ssh", `
 case "$*" in *-tt*) echo "with a terminal" ;; esac
 eval remote=\${$#}
 printf 'ran: %s\n' "$remote"
@@ -193,8 +224,8 @@ echo line-two
 	s.keys("esc")
 	s.expect("services 3")
 
-	if g := s.top().(*table).grid; g.rows[g.cursor].key != "glances.service" {
-		t.Errorf("the cursor left the unit found for %s", g.rows[g.cursor].key)
+	if got := s.selected(); got != "glances.service" {
+		t.Errorf("the cursor left the unit found for %s", got)
 	}
 
 	s.keys("g") // back to the failed unit
@@ -214,7 +245,7 @@ echo line-two
 	s.expect("with a terminal", "-n 300 -o short-iso --no-pager -f", "s stop following")
 
 	// A long line wraps instead of being cut off.
-	stream := s.top().(*text).ch
+	stream := s.text().ch
 	s.m, _ = s.m.Update(logLinesMsg{ch: stream, lines: []string{strings.Repeat("x", 150) + " ENDOFLONGLINE"}})
 	s.expect("ENDOFLONGLINE")
 
@@ -239,7 +270,7 @@ echo line-two
 func TestNavigation(t *testing.T) {
 	r := fixture(t)
 	r.Docker = "docker" // the logs use the docker command the probe found
-	fakeBin(t, "ssh", `eval remote=\${$#}; printf 'ran: %s\n' "$remote"; echo "`+strings.Repeat("y", 150)+` ENDOFLONGLINE"`)
+	testutil.FakeBin(t, "ssh", `eval remote=\${$#}; printf 'ran: %s\n' "$remote"; echo "`+strings.Repeat("y", 150)+` ENDOFLONGLINE"`)
 
 	var copied string
 
@@ -264,8 +295,8 @@ func TestNavigation(t *testing.T) {
 	// J: from immich_server to its stack, in the stacks tab, even filtered out.
 	s.keys("/", "server", "enter", "J")
 
-	if tb := s.top().(*table); tb.kind != stacks || tb.grid.rows[tb.grid.cursor].key != "immich" || tb.filter.Value() != "" {
-		t.Errorf("J went to %s, on row %d", tb.kind.names[0], tb.grid.cursor)
+	if tb := s.table(); tb.kind != stacks || s.selected() != "immich" || tb.filter.Value() != "" {
+		t.Errorf("J went to %s, on %s, filtered %q", tb.kind.names[0], s.selected(), tb.filter.Value())
 	}
 
 	// Back, into the machine; shift+tab goes round the tabs the other way.
@@ -279,7 +310,7 @@ func TestNavigation(t *testing.T) {
 	s.expect("app-node-argiope › stack cook", "containers 1", "cook-cookcli-1")
 	s.keys("J")
 
-	if n := len(s.m.(model).screens); n != 2 {
+	if n := s.depth(); n != 2 {
 		t.Errorf("J from a stack's containers: %d screens, want the machines and the stacks", n)
 	}
 
@@ -314,7 +345,7 @@ func TestNavigation(t *testing.T) {
 
 	// :svc from the logs closes them, their stream with them, and starts over from
 	// the machines, so esc goes back there.
-	logs := s.top().(*text)
+	logs := s.text()
 	s.keys(":", "svc", "enter")
 	s.expect("services 3")
 
@@ -322,7 +353,7 @@ func TestNavigation(t *testing.T) {
 		t.Error("the logs' stream outlived their screen")
 	}
 
-	if n := len(s.m.(model).screens); n != 2 {
+	if n := s.depth(); n != 2 {
 		t.Errorf("%d screens, want the machines and the services", n)
 	}
 
@@ -358,21 +389,16 @@ func TestSort(t *testing.T) {
 	order := func(want ...string) {
 		t.Helper()
 
-		var keys []string
-		for _, row := range s.top().(*table).grid.rows {
-			keys = append(keys, row.key)
-		}
-
-		if !slices.Equal(keys, want) {
-			t.Errorf("rows %q, want %q", keys, want)
+		if got := s.rows(); !slices.Equal(got, want) {
+			t.Errorf("rows %q, want %q", got, want)
 		}
 	}
 
 	on := func(want string) {
 		t.Helper()
 
-		if g := s.top().(*table).grid; g.rows[g.cursor].key != want {
-			t.Errorf("the cursor is on %s, not %s", g.rows[g.cursor].key, want)
+		if got := s.selected(); got != want {
+			t.Errorf("the cursor is on %s, not %s", got, want)
 		}
 	}
 
@@ -419,7 +445,7 @@ func TestStartStop(t *testing.T) {
 	runs := t.TempDir() + "/runs"
 	t.Setenv("RUNS", runs)
 	// The actions' ssh: note what it ran. systemctl fails, as without sudo rights.
-	fakeBin(t, "ssh", `eval remote=\${$#}; echo "$remote" >> "$RUNS"
+	testutil.FakeBin(t, "ssh", `eval remote=\${$#}; echo "$remote" >> "$RUNS"
 case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; esac`)
 
 	s := start(t, r)
@@ -441,7 +467,7 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 
 		s.m, cmd = s.m.Update(msg)
 
-		if m := s.m.(model); m.running != 0 || cmd == nil && !m.again {
+		if m := s.model(); m.running != 0 || cmd == nil && !m.again {
 			t.Errorf("%s: still running, or no refresh after it", key)
 		}
 	}
@@ -449,7 +475,7 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 	// A machine only reboots.
 	s.expect("s ssh • R reboot")
 	for _, k := range []string{"u", "ctrl+k"} {
-		if s.keys(k); s.m.(model).pending != nil {
+		if s.keys(k); s.model().pending != nil {
 			t.Errorf("a machine took %s", k)
 		}
 	}
@@ -478,12 +504,12 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 	// The probe running when it ended may have looked before: another follows.
 	s.m, _ = s.m.Update(reportsMsg{r})
 
-	if m := s.m.(model); !m.refreshing || m.again {
+	if m := s.model(); !m.refreshing || m.again {
 		t.Error("no probe after the one running during the action")
 	}
 
 	// A tick during that probe doesn't queue another: its end sets the next tick.
-	if s.m, _ = s.m.Update(tickMsg(s.m.(model).tickGen)); s.m.(model).again {
+	if s.m, _ = s.m.Update(tickMsg(s.model().tickGen)); s.model().again {
 		t.Error("a tick during a probe queued another")
 	}
 
@@ -506,7 +532,7 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 	s.keys("j")
 	s.expect("J stack • s shell • u start • ^k stop • R restart")
 
-	ro := s.m.(model)
+	ro := s.model()
 	ro.readOnly = true
 	s.m = ro
 
@@ -526,7 +552,7 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 // machine or in a container.
 func TestActions(t *testing.T) {
 	r := fixture(t)
-	fakeBin(t, "ssh", `eval remote=\${$#}; printf 'ran: %s\n' "$remote"`)
+	testutil.FakeBin(t, "ssh", `eval remote=\${$#}; printf 'ran: %s\n' "$remote"`)
 
 	var shell []string
 
@@ -566,7 +592,7 @@ func TestActions(t *testing.T) {
 
 	s.keys("s")
 
-	if s.top().(*text).follow {
+	if s.text().follow {
 		t.Error("s followed a description")
 	}
 
@@ -610,7 +636,7 @@ func TestCard(t *testing.T) {
 	r := fixture(t)
 	runs := t.TempDir() + "/runs"
 	t.Setenv("RUNS", runs)
-	fakeBin(t, "ssh", `echo >> "$RUNS"; cat ../swarm/testdata/container.describe`)
+	testutil.FakeBin(t, "ssh", `echo >> "$RUNS"; cat ../swarm/testdata/container.describe`)
 
 	s := start(t, r)
 	s.keys("enter", "shift+tab") // the containers tab
@@ -645,9 +671,9 @@ func TestCard(t *testing.T) {
 	}
 
 	// In a while, it describes again by itself, the last card showing meanwhile.
-	card := s.top().(*text)
+	card := s.text()
 	s.m, cmd = s.m.Update(redescribeMsg{card, card.runs})
-	s.expect("running · health unhealthy", s.m.(model).spin.View()+" refreshing")
+	s.expect("running · health unhealthy", s.model().spin.View()+" refreshing")
 
 	if _, tick := s.m.Update(spinner.TickMsg{}); tick == nil {
 		t.Error("no spinner while describing")
@@ -718,7 +744,7 @@ func TestCopy(t *testing.T) {
 // right, and there's nothing to wrap.
 func TestCardScroll(t *testing.T) {
 	r := fixture(t)
-	fakeBin(t, "ssh", "cat ../swarm/testdata/unit.describe")
+	testutil.FakeBin(t, "ssh", "cat ../swarm/testdata/unit.describe")
 
 	s := start(t, r)
 	s.resize(60)

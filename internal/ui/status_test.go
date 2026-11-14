@@ -13,12 +13,12 @@ import (
 func TestPrintStatus(t *testing.T) {
 	r := fixture(t)
 	var b strings.Builder
-	if PrintStatus(&b, []swarm.Report{r, {Host: swarm.Host{Name: "garage-node-neatus"}, Err: errTest}}) {
-		t.Error("status reported all OK")
+	if ok, err := PrintStatus(&b, []swarm.Report{r, {Host: swarm.Host{Name: "garage-node-neatus"}, Err: errTest}}); ok || err != nil {
+		t.Errorf("all OK: %v, %v", ok, err)
 	}
 	out := b.String()
 	rows := map[string]string{}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if f := strings.Fields(line); len(f) > 0 && rows[f[0]] == "" { // the table, not the problems below
 			rows[f[0]] = strings.Join(f, " ")
 		}

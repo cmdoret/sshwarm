@@ -16,8 +16,11 @@ func TestCards(t *testing.T) {
 		"machine": {machineCard, []string{"System", "NixOS 26.05 (Yarara)", "6.12.4 · x86_64 · kvm", "4 CPUs", "Usage", "22%", "/ 7.7 GiB", "Disks", "/mnt/media files", "97%", "Processes", "immich"}},
 		"unit":    {unitCard, []string{"backup.service", "failed (failed)", "exit-code", "last exit status 2", "on-failure · 3 restarts", "36.0 MiB / 512.0 MiB", "Recent logs", "connection refused"}},
 		"stack":   {stackCard, []string{"Containers, 0 of 2 fine", "demo-job-1", "exited", "demo-web-1", "6.9%", "1.73MiB", "127.0.0.1:18080->80/tcp"}},
-		"container": {containerCard, []string{"demo-web-1", "alpine:latest", "demo · service web", "running · health unhealthy", "of a CPU, 8 here",
-			"1.82MiB / 15.24GiB", "failed checks in a row", "probe failed", "127.0.0.1:18080 → 80/tcp", "/srv/demo/data → /data (rw)", "values hidden", "\n  DB_PASSWORD\n"}}, // a variable per line
+		"container": {containerCard, []string{
+			"demo-web-1", "alpine:latest", "demo · service web", "running · health unhealthy", "of a CPU, 8 here",
+			"1.82MiB / 15.24GiB", "failed checks in a row", "probe failed", "127.0.0.1:18080 → 80/tcp", "/srv/demo/data → /data (rw)", "values hidden",
+			"\n  DB_PASSWORD\n", // a variable per line
+		}},
 	} {
 		raw, err := os.ReadFile("../swarm/testdata/" + name + ".describe")
 		if err != nil {

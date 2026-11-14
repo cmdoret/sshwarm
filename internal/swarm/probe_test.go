@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cmdoret/sshwarm/internal/testutil"
 )
 
 func fixture(t *testing.T) Report {
@@ -27,18 +28,6 @@ func fixture(t *testing.T) Report {
 	r.Host = Host{Name: "app-node-argiope", Address: "argiope"}
 
 	return r
-}
-
-// fakeBin puts an executable script called name first on PATH.
-func fakeBin(t *testing.T, name, script string) {
-	t.Helper()
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 }
 
 func TestParse(t *testing.T) {
@@ -160,7 +149,7 @@ func TestProbeErrors(t *testing.T) {
 // TestDockerCmd runs the probe here, against a fake docker that answers one way only:
 // the probe must find that way, and keep sudo's error when there's none.
 func TestDockerCmd(t *testing.T) {
-	fakeBin(t, "sudo", `shift; SUDO=1 exec "$@"`) // sudo -n docker …: docker, as root
+	testutil.FakeBin(t, "sudo", `shift; SUDO=1 exec "$@"`) // sudo -n docker …: docker, as root
 
 	tests := []struct{ answers, want string }{
 		{`exit 0`, "docker"},
@@ -170,7 +159,7 @@ func TestDockerCmd(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		fakeBin(t, "docker", tt.answers)
+		testutil.FakeBin(t, "docker", tt.answers)
 
 		cmd := exec.CommandContext(t.Context(), "bash", "-s")
 		cmd.Stdin = strings.NewReader(probeScript)
@@ -194,9 +183,9 @@ func TestDockerCmd(t *testing.T) {
 // A unit's action runs systemctl directly as root, else through sudo, and only once
 // when it fails.
 func TestUnitAction(t *testing.T) {
-	fakeBin(t, "id", `echo "$FAKE_UID"`)
-	fakeBin(t, "sudo", `shift; printf 'sudo '; exec "$@"`) // sudo -n …
-	fakeBin(t, "systemctl", `echo "systemctl $*"; exit 1`)
+	testutil.FakeBin(t, "id", `echo "$FAKE_UID"`)
+	testutil.FakeBin(t, "sudo", `shift; printf 'sudo '; exec "$@"`) // sudo -n …
+	testutil.FakeBin(t, "systemctl", `echo "systemctl $*"; exit 1`)
 
 	for uid, want := range map[string]string{"0": "systemctl --no-block restart it's", "1000": "sudo systemctl --no-block restart it's"} {
 		t.Setenv("FAKE_UID", uid)
@@ -210,9 +199,9 @@ func TestUnitAction(t *testing.T) {
 
 // A reboot is a timer's, a moment later, running systemctl by its full path.
 func TestReboot(t *testing.T) {
-	fakeBin(t, "id", "echo 0")
-	fakeBin(t, "systemctl", "")
-	fakeBin(t, "systemd-run", `echo "$@"`)
+	testutil.FakeBin(t, "id", "echo 0")
+	testutil.FakeBin(t, "systemctl", "")
+	testutil.FakeBin(t, "systemd-run", `echo "$@"`)
 
 	out, err := exec.CommandContext(t.Context(), "bash", "-c", Reboot()).CombinedOutput()
 	if f := strings.Fields(string(out)); err != nil || len(f) != 4 || f[0] != "--on-active=2" || !strings.HasPrefix(f[2], "/") || f[3] != "reboot" {
@@ -242,7 +231,7 @@ func TestSSHCmd(t *testing.T) {
 // one hanging, one whose probe stopped half-way.
 func TestProbeAll(t *testing.T) {
 	// Like real ssh: destination right after --, then the remote command.
-	fakeBin(t, "ssh", `
+	testutil.FakeBin(t, "ssh", `
 while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done
 case "$3" in "timeout "*" bash -s") ;; *) echo "ssh: bad destination or command: $2 $3" >&2; exit 255 ;; esac
 cat >/dev/null
@@ -282,7 +271,7 @@ cat testdata/argiope.probe
 }
 
 func TestCleanLogLines(t *testing.T) {
-	fakeBin(t, "ssh", `printf 'user \033]52;c;aGk=\007logged in\r\n\tindented\n\033[32m[Nest]\033[39m LOG\n'`)
+	testutil.FakeBin(t, "ssh", `printf 'user \033]52;c;aGk=\007logged in\r\n\tindented\n\033[32m[Nest]\033[39m LOG\n'`)
 
 	var got []string
 	for line := range streamLines(t.Context(), Host{Address: "h"}, false, "cmd") {
