@@ -3,6 +3,7 @@
 { pkgs }:
 let
   baseTools = with pkgs; [
+    eza
     go
     just
     nixfmt
