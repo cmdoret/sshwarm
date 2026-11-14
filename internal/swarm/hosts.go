@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os/exec"
@@ -77,6 +78,10 @@ func LoadFlake(ctx context.Context, flakeDir string) ([]Host, error) {
 	cmd.Stderr = &stderr
 
 	out, err := cmd.Output()
+	if errors.Is(err, exec.ErrNotFound) {
+		return nil, errors.New("a flake needs nix, which isn't installed: give a hosts file instead")
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("nix eval: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}

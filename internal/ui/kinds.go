@@ -118,18 +118,13 @@ var machineTitles = []string{"MACHINE", "STATE", "DEPLOY", "UP", "REBOOT", "UNIT
 func machineRow(r swarm.Report) row {
 	if r.Err != nil {
 		cells := slices.Repeat([]cell{{text: "-", rank: -1}}, len(machineTitles)) // unknown: last, biggest first
-		cells[0], cells[1], cells[len(cells)-1] = cell{text: r.Host.Name}, stateCell(bad, "down"), cell{text: r.Err.Error()}
+		cells[0], cells[1], cells[len(cells)-1] = cell{text: r.Host.Name}, stateCell(machineState(r)), cell{text: r.Err.Error()}
 
 		return row{tone: bad, key: r.Host.Name, cells: cells}
 	}
 
 	problems := r.Problems()
-
-	state := stateCell(good, "ok")
-	if len(problems) > 0 {
-		state = stateCell(warn, "degraded")
-	}
-
+	state := stateCell(machineState(r))
 	deployed := ageCell(r, r.Deployed)
 
 	reboot := cell{text: "no"}
@@ -138,14 +133,7 @@ func machineRow(r swarm.Report) row {
 	}
 
 	// Units as stacks: how many of those the services tab lists are fine.
-	watched := 0
-	for _, u := range r.Units {
-		if u.Interesting() {
-			watched++
-		}
-	}
-
-	failed := len(r.Failed())
+	watched, failed := r.Watched(), len(r.Failed())
 
 	units := cell{text: fmt.Sprintf("%d/%d", watched-failed, watched), rank: float64(failed)}
 	if failed > 0 {
@@ -404,6 +392,18 @@ func ageCell(r swarm.Report, t time.Time) cell {
 	d := r.Age(t)
 
 	return cell{text: short(d), rank: d.Seconds()}
+}
+
+// machineState is a machine's state: down, degraded if it has problems, or else ok.
+func machineState(r swarm.Report) (tone, string) {
+	switch {
+	case r.Err != nil:
+		return bad, "down"
+	case len(r.Problems()) > 0:
+		return warn, "degraded"
+	}
+
+	return good, "ok"
 }
 
 // stateCell is a machine's state: it sorts on its tone, worst first.

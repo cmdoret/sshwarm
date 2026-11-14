@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -40,5 +42,33 @@ func TestPrintStatus(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+// As JSON: the table's values, not its text, and the problems; of a machine that's
+// down, only what's known.
+func TestPrintStatusJSON(t *testing.T) {
+	var b strings.Builder
+
+	ok, err := PrintStatusJSON(&b, []swarm.Report{fixture(t), {Host: swarm.Host{Name: "garage-node-neatus"}, Err: errTest}})
+	if ok || err != nil {
+		t.Errorf("all OK: %v, %v", ok, err)
+	}
+
+	var machines []map[string]any
+	if err := json.Unmarshal([]byte(b.String()), &machines); err != nil {
+		t.Fatalf("%v:\n%s", err, b.String())
+	}
+
+	up, down := machines[0], machines[1]
+
+	got := fmt.Sprintf("%v %v %v %v %v %v %v %v %v", up["state"], up["deployed"], up["uptime_seconds"], up["reboot_pending"],
+		up["units"], up["stacks"], up["load"], up["disk"], up["problems"].([]any)[0])
+	if want := "degraded 2026-11-10T06:40:00Z 90061 true map[ok:2 total:3] map[ok:1 total:3] 12.5 93.1 disk 93% full"; got != want {
+		t.Errorf("up:\n got %s\nwant %s", got, want)
+	}
+
+	if got := fmt.Sprint(down); got != "map[name:garage-node-neatus problems:[down: connection refused] state:down]" {
+		t.Errorf("down: %s", got)
 	}
 }

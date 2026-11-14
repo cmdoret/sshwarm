@@ -73,6 +73,20 @@ func (r Report) Failed() []Unit {
 	return out
 }
 
+// Watched counts the units worth watching (Unit.Interesting): those the services
+// tab lists.
+func (r Report) Watched() int {
+	n := 0
+
+	for _, u := range r.Units {
+		if u.Interesting() {
+			n++
+		}
+	}
+
+	return n
+}
+
 // StacksUp counts the stacks whose containers are all OK.
 func (r Report) StacksUp() int {
 	n := 0

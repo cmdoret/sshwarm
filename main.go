@@ -68,7 +68,7 @@ func parseGlobal(args []string) (options, []string, error) {
 
 	fs := newFlagSet("sshwarm")
 	fs.StringVar(&opts.hosts, "hosts", os.Getenv("SSHWARM_HOSTS"), "")
-	fs.StringVar(&opts.flake, "flake", cmp.Or(os.Getenv("SSHWARM_FLAKE"), "."), "")
+	fs.StringVar(&opts.flake, "flake", os.Getenv("SSHWARM_FLAKE"), "")
 	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "")
 	fs.DurationVar(&opts.refresh, "refresh", defaultRefresh, "")
 	fs.BoolVar(&opts.version, "version", false, "")
@@ -112,18 +112,30 @@ func run(opts options, args []string) error {
 		return statusCmd(opts, args[1:])
 	case "probe":
 		return probeCmd(opts, args[1:])
-	case "help":
-		return flag.ErrHelp // main prints the usage
 	default:
-		return fmt.Errorf("unknown command %q, see sshwarm help", args[0])
+		return fmt.Errorf("unknown command %q, see sshwarm --help", args[0])
 	}
 }
+
+const statusHelp = `Usage: sshwarm [flags] status [--format text|json] [machine...]
+
+Print the machines table and exit 1 on any problem. Machines can
+be selected by substrings of their name. All machines by default.
+
+  --format text|json   output format. Text by default.
+`
 
 // statusCmd prints the machines table, then their problems, if any.
 func statusCmd(opts options, args []string) error {
 	fs := newFlagSet("status")
+	format := fs.String("format", "text", "")
+
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOr(err, statusHelp)
+	}
+
+	if *format != "text" && *format != "json" {
+		return fmt.Errorf("unknown format %q: text or json", *format)
 	}
 
 	ctx := context.Background()
@@ -138,18 +150,37 @@ func statusCmd(opts options, args []string) error {
 		return fmt.Errorf("no machine matches %v", fs.Args())
 	}
 
-	if !ui.PrintStatus(os.Stdout, swarm.ProbeAll(ctx, hosts, opts.timeout)) {
+	reports := swarm.ProbeAll(ctx, hosts, opts.timeout)
+
+	ok := true
+
+	switch *format {
+	case "text":
+		ok = ui.PrintStatus(os.Stdout, reports)
+	case "json":
+		if ok, err = ui.PrintStatusJSON(os.Stdout, reports); err != nil {
+			return err
+		}
+	}
+
+	if !ok {
 		return errReported
 	}
 
 	return nil
 }
 
+const probeHelp = `Usage: sshwarm [flags] probe <machine>
+
+Print a machine's raw probe output, mainly for debugging. The machine
+can be referenced by a substring of its name.
+`
+
 // probeCmd prints one machine's raw probe output, for debugging and test fixtures.
 func probeCmd(opts options, args []string) error {
 	fs := newFlagSet("probe")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOr(err, probeHelp)
 	}
 
 	if fs.NArg() != 1 {
@@ -176,6 +207,18 @@ func probeCmd(opts options, args []string) error {
 	return nil
 }
 
+// helpOr prints a command's help if err asks for it (-h, --help), and then there's
+// nothing more to do; else it's err.
+func helpOr(err error, help string) error {
+	if !errors.Is(err, flag.ErrHelp) {
+		return err
+	}
+
+	fmt.Print(help)
+
+	return nil
+}
+
 // newFlagSet returns a flag set that prints nothing: main prints the error, or
 // the usage for -h/--help. Flags take one or two dashes: --flake or -flake.
 func newFlagSet(name string) *flag.FlagSet {
@@ -187,11 +230,14 @@ func newFlagSet(name string) *flag.FlagSet {
 
 // loadHosts loads the machines, from the hosts file or else the flake.
 func loadHosts(ctx context.Context, opts options) ([]swarm.Host, error) {
-	if opts.hosts != "" {
+	switch {
+	case opts.hosts != "":
 		return swarm.LoadFile(opts.hosts)
+	case opts.flake != "":
+		return swarm.LoadFlake(ctx, opts.flake)
 	}
 
-	return swarm.LoadFlake(ctx, opts.flake)
+	return nil, errors.New("No hosts provided. Use --hosts <file> or --flake <dir>, or set SSHWARM_HOSTS or SSHWARM_FLAKE")
 }
 
 func usage() {
@@ -199,15 +245,15 @@ func usage() {
 
   (no command)          browse the machines, their services, stacks and logs
   status [machine...]   print the machines table; exit 1 on any problem
-  probe <machine>       print a machine's raw probe output (debugging, test fixtures)
-  help                  print this message
+  probe <machine>       print a machine's raw probe output (debugging)
 
-Machine can be referenced by substrings of their name.
+Machine can be selected by substrings of their name. See a command's own flags
+with sshwarm <command> --help.
 
 Flags, before the command:
 
   --hosts <file>         the TOML hosts file, see below (default: $SSHWARM_HOSTS)
-  --flake <dir>          without --hosts, the flake defining deploy.nodes (default: $SSHWARM_FLAKE, or .)
+  --flake <dir>          without --hosts, the flake defining deploy.nodes (default: $SSHWARM_FLAKE)
   --timeout <duration>   probe timeout, per machine (default: %v)
   --refresh <duration>   how often the browser refreshes (default: %v)
   --read-only            don't start, stop, restart or reboot anything, nor open shells (default: $SSHWARM_READ_ONLY set, but to 0 or false)

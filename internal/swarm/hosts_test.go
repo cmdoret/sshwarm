@@ -31,6 +31,11 @@ func TestLoadFlake(t *testing.T) {
 	if _, err := LoadFlake(t.Context(), "."); err == nil || !strings.Contains(err.Error(), "no machines") {
 		t.Errorf("empty deploy.nodes: %v", err)
 	}
+
+	t.Setenv("PATH", t.TempDir()) // no nix at all
+	if _, err := LoadFlake(t.Context(), "."); err == nil || !strings.Contains(err.Error(), "needs nix") {
+		t.Errorf("without nix: %v", err)
+	}
 }
 
 func TestLoadFile(t *testing.T) {

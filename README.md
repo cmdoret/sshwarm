@@ -15,7 +15,7 @@ glance, with the logs of whatever is red a keypress away.
 - **In depth overview:** uptime, pending reboot, systemd units, compose stacks, system resources.
 - **Agentless:** a small bash probe over your own `ssh`, with your keys, agent and `~/.ssh/config`. Nothing to install on the machines.
 - **Quick actions:** start/stop services or containers, or reboot a machine.
-- **Scriptable:** `sshwarm status` prints the table and exits 1 when anything is wrong.
+- **Scriptable:** get a json summary of all machines.
 
 ## Get it
 
@@ -51,7 +51,7 @@ sshwarm --hosts hosts.toml
 
 Only `name` is required. ssh looks up `host`, or else `name`, in `~/.ssh/config` for
 anything not set in the file, like ports or jump hosts. Set `SSHWARM_HOSTS` or
-`SSHWARM_FLAKE` to skip the flag. See `sshwarm help` for more.
+`SSHWARM_FLAKE` to skip the flag. See `sshwarm --help` for more.
 
 ```toml
 # hosts.toml: one [[host]] per machine
