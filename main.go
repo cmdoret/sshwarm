@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/cmdoret/sshwarm/internal/swarm"
@@ -25,10 +27,15 @@ const (
 // sshwarm exits 1 without repeating it.
 var errReported = errors.New("reported")
 
+// version and commit are stamped by the Nix build.
+// Without them, versionLine falls back on what Go records itself.
+var version, commit string
+
 // options are the global flags, given before the command.
 type options struct {
 	hosts, flake     string
 	timeout, refresh time.Duration
+	version          bool
 }
 
 func main() {
@@ -63,6 +70,7 @@ func parseGlobal(args []string) (options, []string, error) {
 	fs.StringVar(&opts.flake, "flake", cmp.Or(os.Getenv("SSHWARM_FLAKE"), "."), "")
 	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "")
 	fs.DurationVar(&opts.refresh, "refresh", defaultRefresh, "")
+	fs.BoolVar(&opts.version, "version", false, "")
 
 	err := fs.Parse(args)
 
@@ -72,6 +80,12 @@ func parseGlobal(args []string) (options, []string, error) {
 // run runs the command first in args, with its own flags and arguments after it.
 // Without a command, it opens the browser.
 func run(opts options, args []string) error {
+	if opts.version {
+		fmt.Println(versionLine())
+
+		return nil
+	}
+
 	if len(args) == 0 {
 		hosts, err := loadHosts(context.Background(), opts)
 		if err != nil {
@@ -184,6 +198,7 @@ Flags, before the command:
   --flake <dir>          without --hosts, the flake defining deploy.nodes (default: $SSHWARM_FLAKE, or .)
   --timeout <duration>   probe timeout, per machine (default: %v)
   --refresh <duration>   how often the browser refreshes (default: %v)
+  --version              print the version and the commit it was built from
 
 Hosts file, one [[host]] per machine. ssh looks up its host, or else its name, in
 ~/.ssh/config for anything not set here:
@@ -197,4 +212,26 @@ Hosts file, one [[host]] per machine. ssh looks up its host, or else its name, i
   user = "deploy"
   key  = "~/.ssh/web"
 `, defaultTimeout, defaultRefresh)
+}
+
+// versionLine is "sshwarm x.y.z (<commit>)".
+func versionLine() string {
+	v, c := version, commit
+
+	if info, ok := debug.ReadBuildInfo(); ok {
+		v = cmp.Or(v, info.Main.Version)
+
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" {
+				c = cmp.Or(c, s.Value)
+			}
+		}
+	}
+
+	line := "sshwarm " + strings.TrimPrefix(cmp.Or(v, "(devel)"), "v")
+	if c != "" {
+		line += " (" + c + ")"
+	}
+
+	return line
 }
