@@ -266,15 +266,15 @@ func projectFilter(stack string) string {
 }
 
 // DescribeStack is the describe command of a compose stack, for ParseStack: its
-// containers, then what the running ones use. docker: see StackLogs. Without any
-// container to name, docker stats would list every container: they're named.
-func DescribeStack(docker, stack string) string {
+// containers, then what the running ones use. Without any container to name,
+// docker stats would list every container: they're named.
+func (d Docker) DescribeStack(stack string) string {
 	return inSections(
 		[2]string{"cpus", "getconf _NPROCESSORS_ONLN"},
-		[2]string{"ps", docker + " ps -a " + projectFilter(stack) +
+		[2]string{"ps", string(d) + " ps -a " + projectFilter(stack) +
 			` --format '{{.Names}}\t{{.Label "com.docker.compose.service"}}\t{{.State}}\t{{.Status}}\t{{.Ports}}'`},
-		[2]string{"stats", "ids=$(" + docker + " ps -q " + projectFilter(stack) + `); [ -z "$ids" ] || ` +
-			docker + ` stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}' $ids`},
+		[2]string{"stats", "ids=$(" + string(d) + " ps -q " + projectFilter(stack) + `); [ -z "$ids" ] || ` +
+			string(d) + ` stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}' $ids`},
 	)
 }
 
@@ -334,12 +334,12 @@ type ContainerInfo struct {
 }
 
 // DescribeContainer is the describe command of a container, for ParseContainer:
-// what it uses, then everything docker knows about it. docker: see StackLogs.
-func DescribeContainer(docker, container string) string {
+// what it uses, then everything docker knows about it.
+func (d Docker) DescribeContainer(container string) string {
 	return inSections(
 		[2]string{"cpus", "getconf _NPROCESSORS_ONLN"},
-		[2]string{"stats", docker + ` stats --no-stream --format '{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}' ` + quote(container)},
-		[2]string{"inspect", docker + " inspect " + quote(container)},
+		[2]string{"stats", string(d) + ` stats --no-stream --format '{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}' ` + quote(container)},
+		[2]string{"inspect", string(d) + " inspect " + quote(container)},
 	)
 }
 
