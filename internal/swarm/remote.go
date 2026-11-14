@@ -73,17 +73,19 @@ func ContainerShell(docker, container string) string {
 }
 
 // UnitAction is the command that starts, stops or restarts a systemd unit, for Run.
-func UnitAction(verb, unit string) string { return asRoot("systemctl " + verb + " " + quote(unit)) }
+func UnitAction(verb, unit string) string {
+	return asRoot("systemctl --no-block " + verb + " " + quote(unit))
+}
 
-// Reboot is the command that reboots a machine, for Run. systemctl returns as soon as
-// the reboot is under way: usually in time for ssh to hear so before the machine
-// goes down.
-func Reboot() string { return asRoot("systemctl reboot") }
+// Reboot is the command that reboots a machine, for Run, 2 seconds later: once ssh
+// has ended. systemctl by its full path, which systemd's own may lack (NixOS).
+func Reboot() string {
+	return asRoot(`systemd-run --on-active=2 --timer-property=AccuracySec=1s "$(command -v systemctl)" reboot`)
+}
 
-// asRoot is cmd, run as root: directly if the user is root, as sudo may not be
-// installed; else through sudo, which mustn't ask for a password: without a
-// terminal, nothing can ask for one. Never both: a cmd that failed would run twice.
-// In sh, whatever the user's shell.
+// asRoot is cmd, run as root: directly if the user is root, else through sudo, which
+// mustn't ask for a password, as there's no terminal to ask on. In sh, whatever the
+// user's shell.
 func asRoot(cmd string) string {
 	return "sh -c " + quote(`if [ "$(id -u)" = 0 ]; then `+cmd+"; else sudo -n "+cmd+"; fi")
 }
@@ -100,9 +102,9 @@ func ContainerAction(docker, verb, container string) string {
 	return fmt.Sprintf("%s %s %s", docker, verb, quote(container))
 }
 
-// Run runs cmd on h to its end, and returns its output, stdout and stderr, without
-// control characters. Unlike Stream, it sets no time limit, which could cut an
-// action half-way; and without a terminal, cmd goes on on the host if ssh is killed.
+// Run runs cmd on h to its end, without a time limit, and returns its output, stdout
+// and stderr, without control characters. Without a terminal, cmd goes on on the
+// host if ssh is killed.
 func Run(ctx context.Context, h Host, cmd string) (string, error) {
 	out, err := sshCmd(ctx, h, false, cmd).CombinedOutput()
 	if errors.Is(err, exec.ErrWaitDelay) { // see sshCmd: ssh itself is done

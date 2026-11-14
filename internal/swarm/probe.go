@@ -1,5 +1,5 @@
 // Package swarm talks to the machines over ssh: it lists them, probes them, streams
-// their logs and descriptions, and opens shells.
+// their logs and descriptions, opens shells and runs actions.
 package swarm
 
 import (
@@ -55,7 +55,7 @@ func RunProbe(ctx context.Context, h Host, timeout time.Duration) (string, error
 	defer cancel()
 
 	// The probe stops on its own on the host, a bit before we give up: without a
-	// terminal, killing ssh wouldn't stop a command stuck there (a hung docker ps).
+	// terminal, killing ssh wouldn't stop a command stuck there.
 	onHost := max(int(timeout.Seconds())-2, 1)
 	cmd := sshCmd(ctx, h, false, fmt.Sprintf("timeout %d bash -s", onHost))
 	cmd.Stdin = strings.NewReader(probeScript)

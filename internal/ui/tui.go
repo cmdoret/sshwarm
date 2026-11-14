@@ -98,7 +98,7 @@ func newModel(ctx context.Context, hosts []swarm.Host, timeout, interval time.Du
 func (m model) Init() tea.Cmd { return tea.Batch(m.probe(), m.spin.Tick) }
 
 // refresh probes the machines again. If a probe is running, it probes once that one
-// is in, as it may have looked before what asked for this one: an action, a shell.
+// is in, as that one may predate what asked for this one.
 func (m *model) refresh() tea.Cmd {
 	if m.refreshing {
 		m.again = true
@@ -184,7 +184,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = tea.Batch(cmd, m.refresh())
 		}
 	case tickMsg:
-		if int(msg) == m.tickGen {
+		// During a probe, a tick is moot: that probe's end sets the next one.
+		if int(msg) == m.tickGen && !m.refreshing {
 			cmd = m.refresh()
 		}
 	case spinner.TickMsg:
@@ -230,16 +231,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // key handles the keys every screen shares, unless something is being typed, then
 // hands over to the top screen.
 func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	m.flash = ""
-
 	s := k.String()
 	if s == "ctrl+c" {
 		return m, tea.Quit // Run's context then ends every stream
 	}
 
-	if m.pending != nil {
+	if m.pending != nil { // the prompt hid any message since: confirmKey keeps it
 		return m.confirmKey(k)
 	}
+
+	m.flash = ""
 
 	if m.command.Focused() {
 		return m.commandKey(k)
@@ -278,7 +279,9 @@ func (m model) confirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.pending = nil
 
 	if k.String() != "y" {
-		m.flash = "cancelled"
+		if m.flash == "" { // else how an action went, which came during the prompt: news
+			m.flash = "cancelled"
+		}
 
 		return m, nil
 	}
@@ -502,7 +505,7 @@ func (m model) refreshStatus() string {
 	return dimStyle.Render("refreshed " + m.refreshed.Format(time.TimeOnly))
 }
 
-// Run browses the machines until the user quits; readOnly, without actions.
+// Run browses the machines until the user quits; readOnly, without actions or shells.
 func Run(hosts []swarm.Host, timeout, interval time.Duration, readOnly bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // however the TUI ends, no log stream or probe outlives it

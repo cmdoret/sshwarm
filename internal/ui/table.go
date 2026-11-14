@@ -84,11 +84,7 @@ func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
 	case "d":
 		return t.show(m, t.kind.describe, t.kind.card)
 	case "s":
-		if host, key, ok := t.selected(m); ok && t.kind.shell != nil {
-			r := m.reports[host]
-
-			return m.shell(r.Host, t.kind.shell(r, key))
-		}
+		return t.openShell(m)
 	case "enter":
 		if t.kind.enter == nil {
 			return t.show(m, t.kind.logs, nil)
@@ -172,6 +168,25 @@ func (t *table) ask(m *model, a action) {
 
 	a.host = r.Host
 	m.pending = &a
+}
+
+// openShell opens a shell on the machine, or in the container, under the cursor. Not
+// when read-only: a shell can do anything an action can.
+func (t *table) openShell(m *model) tea.Cmd {
+	host, key, ok := t.selected(m)
+	if !ok || t.kind.shell == nil {
+		return nil
+	}
+
+	if m.readOnly {
+		m.flash = "read-only: no shells"
+
+		return nil
+	}
+
+	r := m.reports[host]
+
+	return m.shell(r.Host, t.kind.shell(r, key))
 }
 
 // show runs the command that command gives for the row under the cursor, and shows

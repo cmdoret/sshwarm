@@ -178,13 +178,25 @@ func TestUnitAction(t *testing.T) {
 	fakeBin(t, "sudo", `shift; printf 'sudo '; exec "$@"`) // sudo -n …
 	fakeBin(t, "systemctl", `echo "systemctl $*"; exit 1`)
 
-	for uid, want := range map[string]string{"0": "systemctl restart it's", "1000": "sudo systemctl restart it's"} {
+	for uid, want := range map[string]string{"0": "systemctl --no-block restart it's", "1000": "sudo systemctl --no-block restart it's"} {
 		t.Setenv("FAKE_UID", uid)
 
 		out, err := exec.CommandContext(t.Context(), "bash", "-c", UnitAction("restart", "it's")).CombinedOutput()
 		if err == nil || strings.TrimSpace(string(out)) != want {
 			t.Errorf("uid %s: %v, ran %q, want %q once", uid, err, out, want)
 		}
+	}
+}
+
+// A reboot is a timer's, a moment later, running systemctl by its full path.
+func TestReboot(t *testing.T) {
+	fakeBin(t, "id", "echo 0")
+	fakeBin(t, "systemctl", "")
+	fakeBin(t, "systemd-run", `echo "$@"`)
+
+	out, err := exec.CommandContext(t.Context(), "bash", "-c", Reboot()).CombinedOutput()
+	if f := strings.Fields(string(out)); err != nil || len(f) != 4 || f[0] != "--on-active=2" || !strings.HasPrefix(f[2], "/") || f[3] != "reboot" {
+		t.Errorf("%v, ran systemd-run %s", err, out)
 	}
 }
 

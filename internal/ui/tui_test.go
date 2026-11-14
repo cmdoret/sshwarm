@@ -482,6 +482,17 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 		t.Error("no probe after the one running during the action")
 	}
 
+	// A tick during that probe doesn't queue another: its end sets the next tick.
+	if s.m, _ = s.m.Update(tickMsg(s.m.(model).tickGen)); s.m.(model).again {
+		t.Error("a tick during a probe queued another")
+	}
+
+	// A message that comes during a prompt still shows once it's answered.
+	s.keys("R")
+	s.m, _ = s.m.Update(shellDoneMsg{errTest})
+	s.keys("n")
+	s.expect("shell ended: connection refused")
+
 	s.keys("tab")
 	act("u")
 	s.expect("started container cook-cookcli-1 on app-node-argiope")
@@ -493,7 +504,7 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 
 	// Read-only: the keys only say so, and the help doesn't offer them.
 	s.keys("j")
-	s.expect("s shell • J stack • u start • ^k stop • R restart")
+	s.expect("J stack • s shell • u start • ^k stop • R restart")
 
 	ro := s.m.(model)
 	ro.readOnly = true
@@ -503,9 +514,12 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 	s.expect("read-only: no actions")
 	s.keys("j")
 
-	if v := s.m.View(); strings.Contains(v, "R restart") {
-		t.Errorf("read-only, actions are still offered:\n%s", v)
+	if v := s.m.View(); strings.Contains(v, "R restart") || strings.Contains(v, "s shell") {
+		t.Errorf("read-only, actions or shells are still offered:\n%s", v)
 	}
+
+	s.keys("s")
+	s.expect("read-only: no shells")
 }
 
 // d describes a machine, a unit, a stack or a container, and s opens a shell on a
@@ -585,7 +599,7 @@ func TestActions(t *testing.T) {
 	// machines table's rows.
 	s.resize(60)
 	s.keys("j") // clears the message
-	s.expect("enter logs • d describe • s shell", "…")
+	s.expect("enter logs • d describe • J stack • s shell", "…")
 	s.keys(":", "machines", "enter")
 	s.expect("MACHINE")
 }

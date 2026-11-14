@@ -21,9 +21,7 @@ import (
 const maxLogLines = 5000
 
 // copyText puts text on the clipboard: with the local clipboard tool (wl-copy, xclip,
-// pbcopy...) when there is one, or else through the terminal (OSC 52), which works
-// over ssh but which some terminals garble, turning newlines into NULs. Tests
-// replace it.
+// pbcopy...) when there is one, or else through the terminal (OSC 52).
 var copyText = func(text string) {
 	if err := clipboard.WriteAll(text); err != nil {
 		termenv.Copy(text)
