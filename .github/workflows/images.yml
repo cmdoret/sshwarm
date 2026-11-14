@@ -24,6 +24,12 @@ jobs:
       - name: Build images
         run: nix develop .#ci --command just image::build
 
+      - name: Check the tag is sshwarm's version
+        if: github.event_name == 'release'
+        run: nix develop .#ci --command just release::check-version "$TAG"
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+
       - name: Log in to ghcr.io
         if: github.event_name == 'release'
         run: echo "$TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
