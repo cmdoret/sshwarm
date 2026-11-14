@@ -5,36 +5,11 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
+
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/mattn/go-runewidth"
 )
-
-// tone colors a row, or one cell when it alone needs attention (like k9s).
-// Terminal palette colors, so they follow the user's theme.
-type tone int
-
-// Tones rank by severity: stackRow keeps the worst with max, and a status sorts on its
-// tone, worst first.
-const (
-	inherit tone = iota // plain for a row; the row's tone for a cell
-	dim
-	good
-	warn
-	bad
-)
-
-var toneStyles = map[tone]lipgloss.Style{
-	good: lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
-	warn: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
-	bad:  lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
-	dim:  dimStyle,
-}
-
-// selection is the cursor row's background: a gray a step off the terminal's own,
-// under which every tone stays readable.
-var selection = lipgloss.AdaptiveColor{Light: "254", Dark: "237"}
 
 type cell struct {
 	text string
@@ -80,14 +55,19 @@ type grid struct {
 // setRows shows rows, sorted as the grid is, with the cursor on the row it was on if
 // that's still there: a refresh or a sort moves rows around.
 func (g *grid) setRows(rows []row) {
-	key := ""
-	if g.cursor < len(g.rows) {
-		key = g.rows[g.cursor].key
-	}
-
+	key, _ := g.selected()
 	g.rows = rows
 	g.sort()
 	g.choose(key)
+}
+
+// selected is the key of the row under the cursor, if there's one.
+func (g grid) selected() (string, bool) {
+	if g.cursor < 0 || g.cursor >= len(g.rows) {
+		return "", false
+	}
+
+	return g.rows[g.cursor].key, true
 }
 
 // choose puts the cursor on the row about key, if there's one.
@@ -186,34 +166,34 @@ func span(ws []int) int {
 func (g *grid) key(k tea.KeyMsg) {
 	page := g.visible()
 
-	switch k.String() {
-	case "up", "k":
+	switch {
+	case key.Matches(k, keyUp):
 		g.cursor--
-	case "down", "j":
+	case key.Matches(k, keyDown):
 		g.cursor++
-	case "pgup":
+	case key.Matches(k, keyPageUp):
 		g.cursor -= page
-	case "pgdown":
+	case key.Matches(k, keyPageDown):
 		g.cursor += page
-	case "ctrl+u":
+	case key.Matches(k, keyHalfUp):
 		g.cursor -= page / 2
-	case "ctrl+d":
+	case key.Matches(k, keyHalfDown):
 		g.cursor += page / 2
-	case "home", "g":
+	case key.Matches(k, keyTop):
 		g.cursor = 0
-	case "end", "G":
+	case key.Matches(k, keyBottom):
 		g.cursor = len(g.rows) - 1
-	case "left":
+	case key.Matches(k, keyLeft):
 		g.scroll--
-	case "right":
+	case key.Matches(k, keyRight):
 		g.scroll++
-	case "shift+left":
+	case key.Matches(k, keyColLeft):
 		g.col = max(g.col-1, 0)
 		g.reveal()
-	case "shift+right":
+	case key.Matches(k, keyColRight):
 		g.col = min(g.col+1, len(g.titles)-1)
 		g.reveal()
-	case "O":
+	case key.Matches(k, keySort):
 		g.sortOn(g.col)
 	}
 
@@ -225,12 +205,12 @@ func (g *grid) key(k tea.KeyMsg) {
 func (g grid) natural() (ws []int, total int) {
 	ws = make([]int, len(g.titles))
 	for i := range g.titles {
-		ws[i] = runewidth.StringWidth(g.title(i))
+		ws[i] = ansi.StringWidth(g.title(i))
 	}
 
 	for _, r := range g.rows {
 		for i, c := range r.cells {
-			ws[i] = max(ws[i], runewidth.StringWidth(c.shown()))
+			ws[i] = max(ws[i], ansi.StringWidth(c.shown()))
 		}
 	}
 
@@ -339,5 +319,7 @@ func (g grid) renderRow(i int, widths []int) []string {
 
 // pad fits s in a column w wide, with a space either side.
 func pad(s string, w int) string {
-	return " " + runewidth.FillRight(runewidth.Truncate(s, w, "…"), w) + " "
+	s = ansi.Truncate(s, w, "…")
+
+	return " " + s + strings.Repeat(" ", max(w-ansi.StringWidth(s), 0)) + " "
 }

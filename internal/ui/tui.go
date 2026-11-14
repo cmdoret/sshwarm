@@ -10,47 +10,61 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/cmdoret/sshwarm/internal/inventory"
+	"github.com/cmdoret/sshwarm/internal/remote"
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
-// accent marks what sshwarm draws itself, the title, tabs, cursor and keys, apart
-// from the tones of what the machines report. A terminal palette color, like those,
-// so it follows the user's theme.
-var accent = lipgloss.Color("5") // magenta
-
-var (
-	titleStyle = lipgloss.NewStyle().Bold(true)
-	dimStyle   = lipgloss.NewStyle().Faint(true)
-	keyStyle   = lipgloss.NewStyle().Bold(true).Foreground(accent)
-	pillStyle  = keyStyle.Reverse(true)
-)
-
 const (
-	// chrome is the lines frame draws around a screen's body: the box's top and bottom
-	// edges, and the help line.
+	// chrome is the lines a frame adds around a screen's body: the box's top and
+	// bottom edges, and the help line.
 	chrome = 3
 
-	// sides is the columns frame draws around a screen's body: the box's edges.
+	// sides is the columns a frame adds around a screen's body: the box's edges.
 	sides = 2
 )
 
 // screen is one level of the TUI: a table, or a command's output. Enter opens a
 // screen over the current one, esc goes back.
 type screen interface {
-	open(m *model) tea.Cmd // fills it, once on top
-	key(m *model, k tea.KeyMsg) tea.Cmd
-	resize(width, height int)
-	view(m *model) string
+	open(m *model) tea.Cmd                // it's on top: fills it
+	update(m *model, msg tea.Msg) tea.Cmd // a key, or a message for it
+	resize(width, height int)             // of the window
+	view(m *model) frame
+	close()       // it's closed: stops what it runs
+	busy() bool   // it waits on a machine: the spinner turns
+	typing() bool // it takes every key, as a filter being typed does
+}
+
+// frame is what a screen shows: its body in a box, with the title and the status on
+// its top edge, and its help below; or when full, the body alone, the whole window.
+type frame struct {
+	title, status, body string
+	help                []key.Binding
+	full                bool
+}
+
+// bodySize is the size of a screen's body in a window width by height: all of it
+// when full, or else what the frame leaves.
+func bodySize(width, height int, full bool) (w, h int) {
+	if full {
+		return width, height
+	}
+
+	return width - sides, height - chrome
 }
 
 type (
 	reportsMsg   []swarm.Report
+	refillMsg    struct{}            // the reports, or what to show of them, changed
 	tickMsg      int                 // refresh generation, so a manual refresh doesn't double the timer
 	shellDoneMsg struct{ err error } // a shell ended, with the error of ssh, or of what it ran
 
@@ -61,71 +75,50 @@ type (
 var execProcess = tea.ExecProcess
 
 type model struct {
-	ctx               context.Context // cancelled when sshwarm exits: ends every ssh it started
-	timeout, interval time.Duration
-
-	hosts      []swarm.Host
-	reports    []swarm.Report // nil until the first probe; then one per host, in order
-	refreshing bool
-	refreshed  time.Time
-	tickGen    int
-	spin       spinner.Model // turns while refreshing
+	ctx     context.Context // cancelled when sshwarm exits: ends every ssh it started
+	hosts   []inventory.Host
+	reports []swarm.Report // nil until the first probe; then one per host, in order
+	probes  prober
+	spin    spinner.Model // turns while the TUI waits on the machines
 
 	readOnly bool    // no actions
 	pending  *action // the action asking to be confirmed, if any
 	running  int     // actions running
-	again    bool    // a refresh was asked for during the probe running: probe after it
 
 	all           bool // services: show every unit, not only the interesting ones
 	width, height int
-	screens       []screen        // the machines at the bottom; the top one is shown
+	fleet         *fleet          // the bottom screen
+	screens       []screen        // the machines' first; the top one is shown
 	command       textinput.Model // the command bar: ":ctr web-1"
 	flash         string          // a message, shown until the next key
 }
 
-func newModel(ctx context.Context, hosts []swarm.Host, timeout, interval time.Duration) model {
+func newModel(ctx context.Context, hosts []inventory.Host, timeout, interval time.Duration) *model {
 	c := textinput.New()
 	c.Prompt = ":"
 
-	return model{
-		ctx: ctx, hosts: hosts, timeout: timeout, interval: interval, refreshing: true,
+	fleet := newFleet()
+
+	return &model{
+		ctx: ctx, hosts: hosts,
+		probes:  prober{ctx: ctx, hosts: hosts, timeout: timeout, interval: interval, running: true}, // Init's
 		spin:    spinner.New(spinner.WithSpinner(spinner.Meter), spinner.WithStyle(keyStyle)),
-		screens: []screen{newTable(machines, -1, "")}, command: c,
+		fleet:   fleet,
+		screens: []screen{fleet}, command: c,
 	}
 }
 
 // Init probes the machines a first time.
-func (m model) Init() tea.Cmd { return tea.Batch(m.probe(), m.spin.Tick) }
+func (m *model) Init() tea.Cmd { return tea.Batch(m.probes.probe(), m.spin.Tick) }
 
-// refresh probes the machines again. If a probe is running, it probes once that one
-// is in, as that one may predate what asked for this one.
-func (m *model) refresh() tea.Cmd {
-	if m.refreshing {
-		m.again = true
+// refresh probes the machines again: see prober.refresh.
+func (m *model) refresh() tea.Cmd { return m.probes.refresh() }
 
-		return nil
-	}
+// waiting says whether the TUI waits on the machines: on a probe, an action, or the
+// screen on top. The spinner turns meanwhile.
+func (m *model) waiting() bool { return m.probes.running || m.running > 0 || m.top().busy() }
 
-	m.refreshing = true
-
-	return m.probe()
-}
-
-// waiting says whether the TUI waits on the machines: on a probe, or on the
-// description on screen. The spinner turns meanwhile.
-func (m model) waiting() bool {
-	t, ok := m.top().(*text)
-
-	return m.refreshing || m.running > 0 || ok && t.card != nil && t.ch != nil
-}
-
-func (m model) probe() tea.Cmd {
-	ctx, hosts, timeout := m.ctx, m.hosts, m.timeout
-
-	return func() tea.Msg { return reportsMsg(swarm.ProbeAll(ctx, hosts, timeout)) }
-}
-
-func (m model) top() screen { return m.screens[len(m.screens)-1] }
+func (m *model) top() screen { return m.screens[len(m.screens)-1] }
 
 // push shows s over the current screen.
 func (m *model) push(s screen) tea.Cmd {
@@ -138,30 +131,27 @@ func (m *model) push(s screen) tea.Cmd {
 // pop goes back to the screen below, if any.
 func (m *model) pop() { m.popTo(max(len(m.screens)-1, 1)) }
 
-// popTo goes back to the n bottom screens. It stops the streams of the logs it
-// closes: nothing else would, until sshwarm exits.
+// popTo goes back to the n bottom screens, closing the others: nothing else would
+// stop what they run, until sshwarm exits.
 func (m *model) popTo(n int) {
 	for _, s := range m.screens[n:] {
-		if t, ok := s.(*text); ok {
-			t.stop()
-		}
+		s.close()
 	}
 
 	m.screens = m.screens[:n]
 }
 
-// fillTables rebuilds every table's rows, after a probe or a toggle.
-func (m *model) fillTables() {
+// refill has every screen show the reports again, after a probe or a toggle.
+func (m *model) refill() tea.Cmd {
+	var cmds []tea.Cmd
 	for _, s := range m.screens {
-		if t, ok := s.(*table); ok {
-			t.fill(m)
-		}
+		cmds = append(cmds, s.update(m, refillMsg{}))
 	}
+
+	return tea.Batch(cmds...)
 }
 
-// Update returns a command computed before m: in `return m, m.refresh()`, Go
-// doesn't say whether m is read before or after refresh changes it.
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	wasWaiting := m.waiting()
 
 	var cmd tea.Cmd
@@ -173,37 +163,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.resize(m.width, m.height)
 		}
 	case reportsMsg:
-		m.reports, m.refreshing, m.refreshed = msg, false, time.Now()
-		m.fillTables()
-		m.tickGen++
-		gen := m.tickGen
-		cmd = tea.Tick(m.interval, func(time.Time) tea.Msg { return tickMsg(gen) })
-
-		if m.again {
-			m.again = false
-			cmd = tea.Batch(cmd, m.refresh())
-		}
+		m.reports = msg
+		cmd = tea.Batch(m.probes.done(), m.refill())
 	case tickMsg:
-		// During a probe, a tick is moot: that probe's end sets the next one.
-		if int(msg) == m.tickGen && !m.refreshing {
-			cmd = m.refresh()
-		}
+		cmd = m.probes.tick(int(msg))
 	case spinner.TickMsg:
 		if m.waiting() { // else no next tick: the spinner stops until the next wait
 			m.spin, cmd = m.spin.Update(msg)
 		}
-	case logLinesMsg:
-		if t, ok := m.top().(*text); ok && msg.ch == t.ch {
-			cmd = t.add(msg)
-
-			if msg.done && t.card != nil {
-				cmd = t.again(m.interval)
-			}
-		}
-	case redescribeMsg:
-		if t, ok := m.top().(*text); ok && t == msg.t && t.runs == msg.run {
-			cmd = t.start(m.ctx, false)
-		}
+	case logLinesMsg, redescribeMsg:
+		cmd = m.top().update(m, msg)
 	case actionDoneMsg:
 		m.running--
 		m.flash = string(msg)
@@ -216,9 +185,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		cmd = m.refresh() // what was done there shows now
 	case tea.KeyMsg:
-		var next tea.Model
-		next, cmd = m.key(msg)
-		m = next.(model)
+		cmd = m.key(msg)
 	}
 
 	if !wasWaiting && m.waiting() { // a wait begins, whatever began it: the spinner turns again
@@ -230,10 +197,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // key handles the keys every screen shares, unless something is being typed, then
 // hands over to the top screen.
-func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	s := k.String()
-	if s == "ctrl+c" {
-		return m, tea.Quit // Run's context then ends every stream
+func (m *model) key(k tea.KeyMsg) tea.Cmd {
+	if key.Matches(k, keyForceQuit) {
+		return tea.Quit // Run's context then ends every stream
 	}
 
 	if m.pending != nil { // the prompt hid any message since: confirmKey keeps it
@@ -246,51 +212,44 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.commandKey(k)
 	}
 
-	var cmd tea.Cmd
-
-	if t, ok := m.top().(*table); ok && t.filter.Focused() {
-		cmd = t.filterKey(&m, k)
-
-		return m, cmd
+	if m.top().typing() {
+		return m.top().update(m, k)
 	}
 
-	if s == "q" {
-		return m, tea.Quit
+	if key.Matches(k, keyQuit) {
+		return tea.Quit
 	}
 
 	if m.reports == nil {
-		return m, nil // nothing to open before the first probe
+		return nil // nothing to open before the first probe
 	}
 
-	switch s {
-	case ":":
-		cmd = m.command.Focus()
-	default:
-		cmd = m.top().key(&m, k)
+	if key.Matches(k, keyGoTo) {
+		return m.command.Focus()
 	}
 
-	return m, cmd
+	return m.top().update(m, k)
 }
 
 // confirmKey runs the action asked for on y, in the background; any other key
 // cancels it.
-func (m model) confirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *model) confirmKey(k tea.KeyMsg) tea.Cmd {
 	a := *m.pending
 	m.pending = nil
 
-	if k.String() != "y" {
+	if !key.Matches(k, keyYes) {
 		if m.flash == "" { // else how an action went, which came during the prompt: news
 			m.flash = "cancelled"
 		}
 
-		return m, nil
+		return nil
 	}
 
 	m.running++
 	ctx := m.ctx
 
-	return m, func() tea.Msg {
-		out, err := swarm.Run(ctx, a.host, a.cmd)
+	return func() tea.Msg {
+		out, err := remote.Run(ctx, a.host, a.cmd)
 
 		return actionDoneMsg(result(a, out, err))
 	}
@@ -314,14 +273,14 @@ func result(a action, out string, err error) string {
 }
 
 // commandKey types into the command bar: enter goes there, esc cancels.
-func (m model) commandKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *model) commandKey(k tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 
-	switch k.String() {
-	case "esc":
+	switch {
+	case key.Matches(k, keyBack):
 		m.command.Blur()
 		m.command.SetValue("")
-	case "enter":
+	case key.Matches(k, keyEnter):
 		m.command.Blur()
 		cmd = m.goTo(m.command.Value())
 		m.command.SetValue("")
@@ -329,7 +288,7 @@ func (m model) commandKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.command, cmd = m.command.Update(k)
 	}
 
-	return m, cmd
+	return cmd
 }
 
 // goTo opens the table a command names: a kind, then a machine by name, or else
@@ -373,26 +332,26 @@ func (m *model) goTo(command string) tea.Cmd {
 	}
 
 	m.popTo(1)
-	m.screens[0].(*table).grid.choose(m.hosts[host].Name) // so that esc goes back to it
+	m.fleet.grid.choose(m.hosts[host].Name) // so that esc goes back to it
 
-	return m.push(newTable(k, host, ""))
+	return m.push(newHost(k, host, ""))
 }
 
-// shell hands the terminal to ssh on h, running remote, or with remote "", a login
-// shell. The TUI is back when it ends.
-func (m *model) shell(h swarm.Host, remote string) tea.Cmd {
-	return execProcess(swarm.Interactive(m.ctx, h, remote), func(err error) tea.Msg { return shellDoneMsg{err} })
+// shell hands the terminal to ssh on h, running cmd, or with cmd "", a login shell.
+// The TUI is back when it ends.
+func (m *model) shell(h inventory.Host, cmd string) tea.Cmd {
+	return execProcess(remote.Interactive(m.ctx, h, cmd), func(err error) tea.Msg { return shellDoneMsg{err} })
 }
 
 // machine is the index of the machine named, or else of the one on screen.
-func (m model) machine(name string) (int, error) {
+func (m *model) machine(name string) (int, error) {
 	if name != "" {
-		return swarm.Find(m.hosts, name)
+		return inventory.Find(m.hosts, name)
 	}
 
 	for _, s := range slices.Backward(m.screens) {
-		if t, ok := s.(*table); ok && t.kind != machines {
-			return t.host, nil
+		if h, ok := s.(*host); ok {
+			return h.machine, nil
 		}
 	}
 
@@ -400,14 +359,14 @@ func (m model) machine(name string) (int, error) {
 }
 
 // View shows the top screen, every line cut to the window's width.
-func (m model) View() string {
+func (m *model) View() string {
 	if m.reports == nil { // in the middle of the window, where the table will be
 		probing := fmt.Sprintf("%s probing %d machines…", m.spin.View(), len(m.hosts))
 
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, probing)
 	}
 
-	lines := strings.Split(m.top().view(&m), "\n")
+	lines := strings.Split(m.draw(m.top().view(m)), "\n")
 	for i, l := range lines {
 		lines[i] = ansi.Truncate(l, m.width, "…")
 	}
@@ -415,23 +374,40 @@ func (m model) View() string {
 	return strings.Join(lines, "\n")
 }
 
-// frame draws a screen like k9s: its body in a rounded box, with the title on the
+// The frame's top edge: left, the title, a space, fill, a space, the status, right.
+const left, right = "╭─ ", " ─╮"
+
+// draw draws a screen like k9s: its body in a rounded box, with the title on the
 // box's top edge and the status at its end. The help line follows, unless the
 // command bar or a message takes its place. The body is cut or padded to fill the
-// box, so the box fills the window.
-func (m *model) frame(title, status, body, help string) string {
-	inner := max(m.width-sides, 0)
+// box, so the box fills the window. A full screen is its body alone, but for the
+// command bar or a message, on its last line.
+func (m *model) draw(f frame) string {
+	bar := m.bar()
+
+	if f.full {
+		lines := strings.Split(f.body, "\n")
+		if bar != "" {
+			lines[len(lines)-1] = bar
+		}
+
+		return strings.Join(lines, "\n")
+	}
+
+	inner, height := bodySize(m.width, m.height, false)
+	inner, height = max(inner, 0), max(height, 0)
 	edge := dimStyle.Render("│")
 
 	var b strings.Builder
 
-	// "╭─ " title " " fill " " status " ─╮": the title gives way first, the status is news.
-	title = ansi.Truncate(title, max(inner-7-ansi.StringWidth(status), 0), "…")
-	fill := max(inner-6-ansi.StringWidth(title)-ansi.StringWidth(status), 1)
-	b.WriteString(dimStyle.Render("╭─ ") + title + dimStyle.Render(" "+strings.Repeat("─", fill)+" ") + status + dimStyle.Render(" ─╮") + "\n")
+	// The title gives way first, the status is news; the fill is at least one wide.
+	edges := ansi.StringWidth(left+right) + 2 // and the spaces around the fill
+	title := ansi.Truncate(f.title, max(m.width-edges-1-ansi.StringWidth(f.status), 0), "…")
+	fill := max(m.width-edges-ansi.StringWidth(title)-ansi.StringWidth(f.status), 1)
+	b.WriteString(dimStyle.Render(left) + title + dimStyle.Render(" "+strings.Repeat("─", fill)+" ") + f.status + dimStyle.Render(right) + "\n")
 
-	lines := strings.Split(body, "\n")
-	for i := range max(m.height-chrome, 0) {
+	lines := strings.Split(f.body, "\n")
+	for i := range height {
 		line := ""
 		if i < len(lines) {
 			line = ansi.Truncate(lines[i], inner, "…")
@@ -442,9 +418,8 @@ func (m *model) frame(title, status, body, help string) string {
 
 	b.WriteString(dimStyle.Render("╰"+strings.Repeat("─", inner)+"╯") + "\n")
 
-	bar := m.bar()
 	if bar == "" {
-		bar = helpLine(help)
+		bar = helpLine(f.help)
 	}
 
 	return b.String() + bar
@@ -453,28 +428,13 @@ func (m *model) frame(title, status, body, help string) string {
 // crumbs is a screen's title: sshwarm, then where the screen is, as in
 // "sshwarm › web-1 › stack db".
 func crumbs(where ...string) string {
-	title := pill("sshwarm")
+	var title strings.Builder
+	title.WriteString(pill("sshwarm"))
 	for _, w := range where {
-		title += dimStyle.Render(" › ") + titleStyle.Render(w)
+		title.WriteString(dimStyle.Render(" › ") + titleStyle.Render(w))
 	}
 
-	return title
-}
-
-// pill highlights text with the accent color as its background.
-func pill(text string) string { return pillStyle.Render(" " + text + " ") }
-
-// helpLine styles a screen's help, "key what · key what": the keys stand out in the
-// accent color, the rest is dim.
-func helpLine(help string) string {
-	var parts []string
-
-	for _, p := range strings.Split(help, " · ") {
-		key, what, _ := strings.Cut(p, " ")
-		parts = append(parts, keyStyle.Render(key)+" "+dimStyle.Render(what))
-	}
-
-	return strings.Join(parts, dimStyle.Render(" • "))
+	return title.String()
 }
 
 // bar is the action to confirm, or the command bar while it's open, or else the
@@ -493,21 +453,21 @@ func (m *model) bar() string {
 }
 
 // refreshStatus says when the reports were last refreshed, or what's running.
-func (m model) refreshStatus() string {
+func (m *model) refreshStatus() string {
 	if m.running > 0 {
 		return m.spin.View() + dimStyle.Render(fmt.Sprintf(" %d running", m.running))
 	}
 
-	if m.refreshing {
+	if m.probes.running {
 		return m.spin.View() + dimStyle.Render(" refreshing")
 	}
 
-	return dimStyle.Render("refreshed " + m.refreshed.Format(time.TimeOnly))
+	return dimStyle.Render("refreshed " + m.probes.last.Format(time.TimeOnly))
 }
 
 // Run browses the machines until the user quits; readOnly, without actions or shells.
-func Run(hosts []swarm.Host, timeout, interval time.Duration, readOnly bool) error {
-	ctx, cancel := context.WithCancel(context.Background())
+func Run(ctx context.Context, hosts []inventory.Host, timeout, interval time.Duration, readOnly bool) error {
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // however the TUI ends, no log stream or probe outlives it
 
 	m := newModel(ctx, hosts, timeout, interval)

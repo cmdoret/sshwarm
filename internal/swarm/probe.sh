@@ -45,11 +45,14 @@ docker_cmd() {
   echo "sudo -n docker" # none works: the containers section shows its error
 }
 
-# container_times prints when each compose container last started and stopped.
-container_times() {
+# container_states prints what docker inspect says of each compose container, as
+# stateFormat in probe.go. A container gone since ps isn't a failure: the others'
+# lines are still printed, and that one's error left out.
+container_states() {
   # shellcheck disable=SC2086 # words, split on purpose: "sudo -n docker"
   $docker ps -aq --filter label=com.docker.compose.project |
-    xargs -r $docker inspect --format '{{.Name}} {{.State.StartedAt}} {{.State.FinishedAt}}'
+    xargs -r $docker inspect --format '{{.Name}} {{.State.StartedAt}} {{.State.FinishedAt}} {{.State.ExitCode}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' 2>/dev/null ||
+    true
 }
 
 echo "### meta"
@@ -83,5 +86,5 @@ if [ -n "$docker" ]; then
   # shellcheck disable=SC2086 # words, split on purpose: "sudo -n docker"
   section containers $docker ps -a --filter label=com.docker.compose.project \
     --format '{{.Label "com.docker.compose.project"}}\t{{.Names}}\t{{.State}}\t{{.Status}}'
-  section times container_times
+  section states container_states
 fi

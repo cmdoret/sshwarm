@@ -1,4 +1,6 @@
-package swarm
+// Package inventory lists the machines sshwarm watches, and how to reach them over
+// ssh: from a TOML hosts file, or a Nix flake's deploy.nodes.
+package inventory
 
 import (
 	"bytes"
@@ -8,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -15,6 +18,13 @@ import (
 
 	"github.com/BurntSushi/toml"
 )
+
+// Host is a machine sshwarm watches: its name, and how to reach it over ssh.
+type Host struct {
+	Name    string   // as the flake or hosts file names it, e.g. web-1
+	Address string   // ssh destination, user@hostname
+	Opts    []string // extra ssh options
+}
 
 // Select keeps the hosts whose name contains one of names.
 // If no names are given, all hosts are selected.
@@ -34,8 +44,9 @@ func Select(hosts []Host, names []string) []Host {
 	return out
 }
 
-// Find is the index of the one host name means: the host with that exact name, or
-// the only one whose name contains it. Multiple matches result in error.
+// Find returns the index of the host that name refers to: the one with that exact
+// name, or else the only one whose name contains it. It fails if none does, or if
+// several do.
 func Find(hosts []Host, name string) (int, error) {
 	if i := slices.IndexFunc(hosts, func(h Host) bool { return h.Name == name }); i >= 0 {
 		return i, nil
@@ -123,9 +134,14 @@ func LoadFile(path string) ([]Host, error) {
 		Host []struct{ Name, Host, User, Key string }
 	}
 
-	md, err := toml.DecodeFile(path, &file)
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("hosts file: %w", err)
+		return nil, err // it names the file
+	}
+
+	md, err := toml.Decode(string(raw), &file)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 
 	if keys := md.Undecoded(); len(keys) > 0 {

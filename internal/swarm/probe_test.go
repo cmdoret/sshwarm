@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cmdoret/sshwarm/internal/inventory"
+	"github.com/cmdoret/sshwarm/internal/testutil"
 )
 
 func fixture(t *testing.T) Report {
@@ -24,21 +26,9 @@ func fixture(t *testing.T) Report {
 		t.Fatal(err)
 	}
 
-	r.Host = Host{Name: "app-node-argiope", Address: "argiope"}
+	r.Host = inventory.Host{Name: "app-node-argiope", Address: "argiope"}
 
 	return r
-}
-
-// fakeBin puts an executable script called name first on PATH.
-func fakeBin(t *testing.T, name, script string) {
-	t.Helper()
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 }
 
 func TestParse(t *testing.T) {
@@ -51,7 +41,7 @@ func TestParse(t *testing.T) {
 		t.Errorf("deployed %v, uptime %v", r.Deployed, r.Uptime)
 	}
 
-	if r.Load != 12.5 || r.Memory != 74.2 || r.Disk != 93.1 {
+	if r.Load == nil || r.Memory == nil || r.Disk == nil || *r.Load != 12.5 || *r.Memory != 74.2 || *r.Disk != 93.1 {
 		t.Errorf("load %v, memory %v, disk %v", r.Load, r.Memory, r.Disk)
 	}
 
@@ -107,6 +97,30 @@ func TestUnloadedUnits(t *testing.T) {
 	}
 }
 
+// The probe asks docker inspect for its containers' states as describe does, and
+// as parseStates reads them.
+func TestStateFormat(t *testing.T) {
+	if !strings.Contains(probeScript, "inspect --format '"+stateFormat+"'") {
+		t.Errorf("probe.sh's docker inspect format isn't stateFormat: %s", stateFormat)
+	}
+}
+
+// Lines that don't read are a problem, not a silent gap: a format changed. Blank
+// lines aren't.
+func TestMisread(t *testing.T) {
+	r, err := Parse("### meta\nnow=1\n### units\nId=web.service\n\nnot a unit\n\n" +
+		"### containers\nweb\tweb-1\trunning\tUp\nweb web-2 running\n\n" +
+		"### states\n/web-1 0001-01-01T00:00:00Z 0001-01-01T00:00:00Z 0 -\n/web-2 yesterday\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"containers: 1 unreadable lines", "states: 1 unreadable lines", "units: 1 unreadable lines"}
+	if !slices.Equal(r.Errors, want) || len(r.Units) != 1 || len(r.Stacks) != 1 {
+		t.Errorf("errors %q, want %q; units %v, stacks %v", r.Errors, want, r.Units, r.Stacks)
+	}
+}
+
 // Elsewhere than NixOS, there is no deploy time or revision, and nothing's wrong.
 func TestParseNotNixOS(t *testing.T) {
 	raw, err := os.ReadFile("testdata/debian.probe")
@@ -143,7 +157,7 @@ func TestProbeErrors(t *testing.T) {
 		t.Error("docker that fails must still count as present")
 	}
 
-	if r.Load != -1 || r.Memory != -1 || r.Disk != -1 {
+	if r.Load != nil || r.Memory != nil || r.Disk != nil {
 		t.Errorf("usage not measured must be unknown, not 0%%: load %v, memory %v, disk %v", r.Load, r.Memory, r.Disk)
 	}
 
@@ -160,7 +174,7 @@ func TestProbeErrors(t *testing.T) {
 // TestDockerCmd runs the probe here, against a fake docker that answers one way only:
 // the probe must find that way, and keep sudo's error when there's none.
 func TestDockerCmd(t *testing.T) {
-	fakeBin(t, "sudo", `shift; SUDO=1 exec "$@"`) // sudo -n docker …: docker, as root
+	testutil.FakeBin(t, "sudo", `shift; SUDO=1 exec "$@"`) // sudo -n docker …: docker, as root
 
 	tests := []struct{ answers, want string }{
 		{`exit 0`, "docker"},
@@ -170,7 +184,7 @@ func TestDockerCmd(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		fakeBin(t, "docker", tt.answers)
+		testutil.FakeBin(t, "docker", tt.answers)
 
 		cmd := exec.CommandContext(t.Context(), "bash", "-s")
 		cmd.Stdin = strings.NewReader(probeScript)
@@ -185,56 +199,9 @@ func TestDockerCmd(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if r.Docker != tt.want {
+		if string(r.Docker) != tt.want {
 			t.Errorf("docker answering %s: got %q, want %q", tt.answers, r.Docker, tt.want)
 		}
-	}
-}
-
-// A unit's action runs systemctl directly as root, else through sudo, and only once
-// when it fails.
-func TestUnitAction(t *testing.T) {
-	fakeBin(t, "id", `echo "$FAKE_UID"`)
-	fakeBin(t, "sudo", `shift; printf 'sudo '; exec "$@"`) // sudo -n …
-	fakeBin(t, "systemctl", `echo "systemctl $*"; exit 1`)
-
-	for uid, want := range map[string]string{"0": "systemctl --no-block restart it's", "1000": "sudo systemctl --no-block restart it's"} {
-		t.Setenv("FAKE_UID", uid)
-
-		out, err := exec.CommandContext(t.Context(), "bash", "-c", UnitAction("restart", "it's")).CombinedOutput()
-		if err == nil || strings.TrimSpace(string(out)) != want {
-			t.Errorf("uid %s: %v, ran %q, want %q once", uid, err, out, want)
-		}
-	}
-}
-
-// A reboot is a timer's, a moment later, running systemctl by its full path.
-func TestReboot(t *testing.T) {
-	fakeBin(t, "id", "echo 0")
-	fakeBin(t, "systemctl", "")
-	fakeBin(t, "systemd-run", `echo "$@"`)
-
-	out, err := exec.CommandContext(t.Context(), "bash", "-c", Reboot()).CombinedOutput()
-	if f := strings.Fields(string(out)); err != nil || len(f) != 4 || f[0] != "--on-active=2" || !strings.HasPrefix(f[2], "/") || f[3] != "reboot" {
-		t.Errorf("%v, ran systemd-run %s", err, out)
-	}
-}
-
-func TestSSHCmd(t *testing.T) {
-	args := sshCmd(t.Context(), Host{Address: "-oProxyCommand=x", Opts: []string{"-p", "2222"}}, true, "uptime").Args
-	n := len(args)
-
-	if !slices.Equal(args[n-3:], []string{"--", "-oProxyCommand=x", "uptime"}) {
-		t.Errorf("want -- destination command at the end: %q", args)
-	}
-
-	if i := slices.Index(args, "-p"); i < 0 || args[i+1] != "2222" || !slices.Contains(args[:n-3], "-tt") {
-		t.Errorf("host options and the terminal go before --: %q", args)
-	}
-
-	// No remote command: a login shell.
-	if args := sshCmd(t.Context(), Host{Address: "h"}, true, "").Args; args[len(args)-1] != "h" {
-		t.Errorf("want the destination last: %q", args)
 	}
 }
 
@@ -242,7 +209,7 @@ func TestSSHCmd(t *testing.T) {
 // one hanging, one whose probe stopped half-way.
 func TestProbeAll(t *testing.T) {
 	// Like real ssh: destination right after --, then the remote command.
-	fakeBin(t, "ssh", `
+	testutil.FakeBin(t, "ssh", `
 while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done
 case "$3" in "timeout "*" bash -s") ;; *) echo "ssh: bad destination or command: $2 $3" >&2; exit 255 ;; esac
 cat >/dev/null
@@ -255,7 +222,7 @@ cat testdata/argiope.probe
 `)
 
 	start := time.Now()
-	hosts := []Host{{Address: "ok"}, {Address: "down"}, {Address: "slow"}, {Address: "half"}}
+	hosts := []inventory.Host{{Address: "ok"}, {Address: "down"}, {Address: "slow"}, {Address: "half"}}
 	r := ProbeAll(t.Context(), hosts, time.Second)
 
 	if took := time.Since(start); took > 4*time.Second {
@@ -270,7 +237,7 @@ cat testdata/argiope.probe
 		t.Errorf("down host: %v", r[1].Err)
 	}
 
-	if r[2].Err == nil || r[2].Err.Error() != "timed out" {
+	if r[2].Err == nil || r[2].Err.Error() != "timed out after 1s" {
 		t.Errorf("slow host: %v", r[2].Err)
 	}
 
@@ -278,19 +245,5 @@ cat testdata/argiope.probe
 	want := []string{"containers: no docker", "probe: timed out on the host"}
 	if r[3].Err != nil || !r[3].RebootPending || !slices.Equal(r[3].Errors, want) {
 		t.Errorf("half host: %v %q", r[3].Err, r[3].Errors)
-	}
-}
-
-func TestCleanLogLines(t *testing.T) {
-	fakeBin(t, "ssh", `printf 'user \033]52;c;aGk=\007logged in\r\n\tindented\n\033[32m[Nest]\033[39m LOG\n'`)
-
-	var got []string
-	for line := range streamLines(t.Context(), Host{Address: "h"}, false, "cmd") {
-		got = append(got, line)
-	}
-
-	// No escape sequence, colors included, and no stray carriage return.
-	if want := []string{"user logged in", "\tindented", "[Nest] LOG"}; !slices.Equal(got, want) {
-		t.Errorf("got %q, want %q", got, want)
 	}
 }

@@ -26,7 +26,7 @@ build *archs=arches:
 load arch=native_arch: (build arch)
   @"{{nu_log}}" info "Loading the {{arch}} image into docker..."
   "{{out_dir}}/{{arch}}" | docker load
-  @"{{nu_log}}" info "Try it: docker run --rm -it {{repo}}:{{arch}} help"
+  @"{{nu_log}}" info "Try it: docker run --rm -it {{repo}}:{{arch}} --help"
 
 # Push the images to ghcr.io as each tag given, e.g. 1.2.0 latest (docker login)
 push +tags: build

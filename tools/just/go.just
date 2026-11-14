@@ -16,9 +16,14 @@ test *args:
 # Lint the code: the Go, and the probe's shell
 lint *args:
   @"{{nu_log}}" info "Linting go code..."
-  go vet "$@" "{{root_dir}}/..."
+  cd "{{root_dir}}" && golangci-lint run "$@" ./...
   @"{{nu_log}}" info "Linting shell scripts..."
   shellcheck "{{root_dir}}/internal/swarm/probe.sh"
+
+# Check the code's dependencies and Go itself for known vulnerabilities
+vuln *args:
+  @"{{nu_log}}" info "Checking for known vulnerabilities..."
+  cd "{{root_dir}}" && govulncheck "$@" ./...
 
 # Update the Go dependencies to their latest minor and patch versions
 update *args:

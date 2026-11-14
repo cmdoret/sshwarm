@@ -44,8 +44,8 @@ func TestParseMachine(t *testing.T) {
 		t.Errorf("disks: %+v", m.Disks)
 	}
 
-	if fmt.Sprintf("%.1f", m.CPUBusy) != "22.1" || len(m.Processes) != 5 || m.Processes[0] != (Process{PID: "2817", User: "root", Command: "immich", CPU: 61, Mem: 15.3}) {
-		t.Errorf("top: %.1f %+v", m.CPUBusy, m.Processes)
+	if m.CPUBusy == nil || fmt.Sprintf("%.1f", *m.CPUBusy) != "22.1" || len(m.Processes) != 5 || m.Processes[0] != (Process{PID: "2817", User: "root", Command: "immich", CPU: 61, Mem: 15.3}) {
+		t.Errorf("top: %v %+v", m.CPUBusy, m.Processes)
 	}
 
 	if _, err := ParseMachine(sshError); err == nil {
@@ -53,8 +53,12 @@ func TestParseMachine(t *testing.T) {
 	}
 
 	// An idle machine's 100.0 touches the comma before it: still idle, not busy.
-	if busy, _ := parseTop("%Cpu(s):  0.0 us,  0.0 sy,  0.0 ni,100.0 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st"); busy != 0 {
-		t.Errorf("an idle machine is %.0f%% busy", busy)
+	if busy, _ := parseTop("%Cpu(s):  0.0 us,  0.0 sy,  0.0 ni,100.0 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st"); busy == nil || *busy != 0 {
+		t.Errorf("an idle machine is %v%% busy", busy)
+	}
+
+	if busy, _ := parseTop("no top here"); busy != nil {
+		t.Errorf("without top, %v%% busy, not unknown", *busy)
 	}
 }
 

@@ -11,12 +11,11 @@ import (
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
-// PrintStatus writes the machines table, then what's wrong.
-// It returns false if any machine is unreachable or has a problem.
-func PrintStatus(w io.Writer, reports []swarm.Report) bool {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+// PrintStatus writes the machines table, then what's wrong. It returns false if any
+// machine is unreachable or has a problem, and the error of writing to w, if any.
+func PrintStatus(w io.Writer, reports []swarm.Report) (bool, error) {
 	columns := len(machineTitles) - 1 // PROBLEMS go below the table
-	fmt.Fprintln(tw, strings.Join(machineTitles[:columns], "\t"))
+	lines := []string{strings.Join(machineTitles[:columns], "\t")}
 
 	var details []string
 
@@ -26,20 +25,29 @@ func PrintStatus(w io.Writer, reports []swarm.Report) bool {
 			cells = append(cells, c.text)
 		}
 
-		fmt.Fprintln(tw, strings.Join(cells, "\t"))
+		lines = append(lines, strings.Join(cells, "\t"))
 
 		for _, p := range r.Problems() {
 			details = append(details, r.Host.Name+" "+p)
 		}
 	}
 
-	tw.Flush()
-
-	if len(details) > 0 {
-		fmt.Fprintf(w, "\n%s\n", strings.Join(details, "\n"))
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if _, err := io.WriteString(tw, strings.Join(lines, "\n")+"\n"); err != nil {
+		return false, err
 	}
 
-	return len(details) == 0
+	if err := tw.Flush(); err != nil {
+		return false, err
+	}
+
+	if len(details) > 0 {
+		if _, err := fmt.Fprintf(w, "\n%s\n", strings.Join(details, "\n")); err != nil {
+			return false, err
+		}
+	}
+
+	return len(details) == 0, nil
 }
 
 // machineJSON is a machine in `sshwarm status --format json`: the table's columns as
@@ -57,12 +65,6 @@ type machineJSON struct {
 	Memory        *float64   `json:"memory,omitempty"` // percent
 	Disk          *float64   `json:"disk,omitempty"`   // percent, of the fullest local disk
 	Problems      []string   `json:"problems"`
-}
-
-// count is how many of something are fine, of how many.
-type count struct {
-	OK    int `json:"ok"`
-	Total int `json:"total"`
 }
 
 // PrintStatusJSON writes the machines as a JSON array of machineJSON. Like
@@ -84,7 +86,7 @@ func PrintStatusJSON(w io.Writer, reports []swarm.Report) (bool, error) {
 	return ok, enc.Encode(machines)
 }
 
-// statusOf is r as machineJSON.
+// statusOf turns r into what the JSON says of its machine.
 func statusOf(r swarm.Report) machineJSON {
 	_, state := machineState(r)
 	m := machineJSON{Name: r.Host.Name, State: state, Problems: append([]string{}, r.Problems()...)} // [] without any
@@ -97,24 +99,10 @@ func statusOf(r swarm.Report) machineJSON {
 		m.Deployed = new(r.Deployed.UTC())
 	}
 
-	watched, failed := r.Watched(), len(r.Failed())
+	units, stacks := counts(r)
+	m.Units, m.Stacks = &units, stacks
 	m.Uptime, m.RebootPending = new(int64(r.Uptime.Seconds())), new(r.RebootPending)
-	m.Units = &count{OK: watched - failed, Total: watched}
-
-	if r.Docker != "" {
-		m.Stacks = &count{OK: r.StacksUp(), Total: len(r.Stacks)}
-	}
-
-	m.Load, m.Memory, m.Disk = known(r.Load), known(r.Memory), known(r.Disk)
+	m.Load, m.Memory, m.Disk = r.Load, r.Memory, r.Disk
 
 	return m
-}
-
-// known is a percentage the probe measured, or nil if it couldn't (-1).
-func known(percent float64) *float64 {
-	if percent < 0 {
-		return nil
-	}
-
-	return &percent
 }

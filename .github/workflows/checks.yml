@@ -5,6 +5,11 @@ on:
     branches: [main]
   push:
     branches: [main]
+permissions:
+  contents: read
+concurrency: # a new push supersedes the run of the previous one
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   checks:
     name: Format, lint, test and build
@@ -26,7 +31,10 @@ jobs:
         run: nix develop .#ci --command just lint
 
       - name: Test
-        run: nix develop .#ci --command just test
+        run: nix develop .#ci --command just go::test -race -cover
+
+      - name: Check for known vulnerabilities
+        run: nix develop .#ci --command just go::vuln
 
       # As users get it: the tests again, in Nix's sandbox, and the vendorHash.
       - name: Build

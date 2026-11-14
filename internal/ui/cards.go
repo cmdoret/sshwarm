@@ -14,7 +14,7 @@ import (
 // A card is a human-readable description with values rendered into fields,
 // tables, and bars for what's used. Each kind's card parses its describe
 // command's output with swarm, and draws it whole: lines wider than the window
-// scroll left and right. On an error, the text screen shows the output as it came
+// scroll left and right. On an error, the output screen shows the output as it came
 // instead.
 
 const (
@@ -76,7 +76,7 @@ func (c *card) table(titles []string, rows []row) {
 	g := grid{titles: titles, rows: rows, height: len(rows) + 1, cursor: -1, col: -1}
 	_, g.width = g.natural()
 
-	for _, l := range strings.Split(g.view(), "\n") {
+	for l := range strings.SplitSeq(g.view(), "\n") {
 		c.line(l)
 	}
 }
@@ -99,16 +99,26 @@ func barCell(f float64, text string) cell {
 }
 
 // usageTone rates how much of something is used: fine below 70%, a warning below
-// 90%, then bad. From 90%, a disk is also one of a machine's problems (swarm.FullDisk).
+// swarm.FullDisk, 90%, from which a disk is also one of a machine's problems; then bad.
 func usageTone(f float64) tone {
 	switch {
-	case f >= 0.9:
+	case f*100 >= swarm.FullDisk:
 		return bad
 	case f >= 0.7:
 		return warn
 	}
 
 	return good
+}
+
+// ago says how long ago t was on the host, whose clock read now; on this
+// machine's clock if now is unknown.
+func ago(now, t time.Time) string {
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	return short(now.Sub(t)) + " ago"
 }
 
 // fraction is part of whole, 0 for nothing of nothing.
@@ -164,8 +174,8 @@ func machineCard(out string) (string, error) {
 
 	c.section("Usage")
 
-	if m.CPUBusy >= 0 {
-		c.usage("CPU", m.CPUBusy/100, fmt.Sprintf("%.0f%%", m.CPUBusy))
+	if m.CPUBusy != nil {
+		c.usage("CPU", *m.CPUBusy/100, fmt.Sprintf("%.0f%%", *m.CPUBusy))
 	}
 
 	c.usage("Load", m.Load[0]/float64(max(m.CPUs, 1)), fmt.Sprintf("%.2f %.2f %.2f on %d CPUs", m.Load[0], m.Load[1], m.Load[2], m.CPUs))
@@ -213,11 +223,11 @@ func unitCard(out string) (string, error) {
 
 	var c card
 
-	state := toneStyles[unitTone(u.Active)].Render("● " + u.Active + " (" + u.Sub + ")")
+	state := toneStyles[toneOf(u.Condition())].Render("● " + u.Active + " (" + u.Sub + ")")
 
 	since := ""
 	if !u.Since.IsZero() {
-		since = "since " + short(time.Since(u.Since)) + " ago"
+		since = "since " + ago(u.Now, u.Since)
 	}
 
 	result := u.Result
@@ -285,8 +295,8 @@ func stackCard(out string) (string, error) {
 	var rows []row
 
 	for _, sc := range s.Containers {
-		t := containerTone(sc.Container)
-		if sc.OK() {
+		t := toneOf(sc.Condition())
+		if sc.Condition() != swarm.Broken {
 			ok++
 		}
 
@@ -315,16 +325,7 @@ func containerCard(out string) (string, error) {
 
 	var c card
 
-	t := good
-
-	switch {
-	case ci.Health == "unhealthy", ci.State == "restarting", ci.State == "dead", ci.State == "exited" && ci.ExitCode != 0:
-		t = bad
-	case ci.Health == "starting", ci.State == "created", ci.State == "paused":
-		t = warn
-	}
-
-	state := toneStyles[t].Render("● " + ci.State)
+	state := toneStyles[toneOf(ci.Condition())].Render("● " + ci.State)
 	if !ci.Running && ci.ExitCode != 0 {
 		state += toneStyles[bad].Render(fmt.Sprintf(" (exit %d)", ci.ExitCode))
 	}
@@ -336,7 +337,7 @@ func containerCard(out string) (string, error) {
 
 	started := ""
 	if !ci.StartedAt.IsZero() {
-		started = ci.StartedAt.Local().Format("2006-01-02 15:04") + " · " + short(time.Since(ci.StartedAt)) + " ago"
+		started = ci.StartedAt.Local().Format("2006-01-02 15:04") + " · " + ago(ci.Now, ci.StartedAt)
 	}
 
 	stack := ""

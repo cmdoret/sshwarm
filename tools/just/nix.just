@@ -12,7 +12,7 @@ vendor_hash := root_dir / "tools/nix/sshwarm-hash.txt"
 default:
   @just -f "{{source_file()}}" --list --unsorted
 
-# Lint the code: the Go, and the probe's shell
+# Check the flake: its outputs build, and their checks pass
 lint *args:
   @"{{nu_log}}" info "Linting nix flake..."
   nix flake check "$@" "{{root_dir}}"

@@ -1,4 +1,4 @@
-package swarm
+package inventory
 
 import (
 	"fmt"
@@ -8,11 +8,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cmdoret/sshwarm/internal/testutil"
 )
 
 func TestLoadFlake(t *testing.T) {
 	// The fake nix echoes the flake reference it was given into the hostname.
-	fakeBin(t, "nix", `echo "{\"b-node\":{\"hostname\":\"$3\",\"sshUser\":\"\",\"sshOpts\":[\"-p\",\"2\"]},\"a-node\":{\"hostname\":\"h\",\"sshUser\":\"u\",\"sshOpts\":[]}}"`)
+	testutil.FakeBin(t, "nix", `echo "{\"b-node\":{\"hostname\":\"$3\",\"sshUser\":\"\",\"sshOpts\":[\"-p\",\"2\"]},\"a-node\":{\"hostname\":\"h\",\"sshUser\":\"u\",\"sshOpts\":[]}}"`)
 
 	hosts, err := LoadFlake(t.Context(), "nix")
 	if err != nil {
@@ -27,7 +29,7 @@ func TestLoadFlake(t *testing.T) {
 		t.Errorf("the flake must be an absolute path, not a registry name: %q", hosts[1].Address)
 	}
 
-	fakeBin(t, "nix", `echo "{}"`)
+	testutil.FakeBin(t, "nix", `echo "{}"`)
 	if _, err := LoadFlake(t.Context(), "."); err == nil || !strings.Contains(err.Error(), "no machines") {
 		t.Errorf("empty deploy.nodes: %v", err)
 	}

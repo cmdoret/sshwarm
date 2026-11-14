@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cmdoret/sshwarm/internal/inventory"
 	"github.com/cmdoret/sshwarm/internal/swarm"
 	"github.com/cmdoret/sshwarm/internal/ui"
 )
@@ -40,81 +41,86 @@ type options struct {
 }
 
 func main() {
-	opts, args, err := parseGlobal(os.Args[1:])
-	if err == nil {
-		err = run(opts, args)
-	}
-
-	if err == nil {
-		return
-	}
-
-	if errors.Is(err, flag.ErrHelp) {
-		usage()
-
-		return
-	}
-
-	if !errors.Is(err, errReported) {
-		fmt.Fprintf(os.Stderr, "sshwarm: %v\n", err)
-	}
-
-	os.Exit(1)
+	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr, os.Getenv))
 }
 
-// parseGlobal parses the flags before the command, and returns the arguments after them.
-func parseGlobal(args []string) (options, []string, error) {
+// run runs sshwarm with args, and returns its exit status. It writes to stdout, its
+// errors to stderr, and reads the environment with getenv.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) int {
+	err := dispatch(ctx, args, stdout, getenv)
+	if errors.Is(err, flag.ErrHelp) { // sshwarm -h
+		err = usage(stdout)
+	}
+
+	switch {
+	case err == nil:
+		return 0
+	case !errors.Is(err, errReported): // else the output already says what's wrong
+		_, _ = fmt.Fprintf(stderr, "sshwarm: %v\n", err) // nowhere left to say it failed
+	}
+
+	return 1
+}
+
+// dispatch parses the global flags, then runs the command first in the arguments
+// after them, with its own flags and arguments. Without a command, it opens the
+// browser.
+func dispatch(ctx context.Context, args []string, stdout io.Writer, getenv func(string) string) error {
 	var opts options
 
-	fs := newFlagSet("sshwarm")
-	fs.StringVar(&opts.hosts, "hosts", os.Getenv("SSHWARM_HOSTS"), "")
-	fs.StringVar(&opts.flake, "flake", os.Getenv("SSHWARM_FLAKE"), "")
-	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "")
-	fs.DurationVar(&opts.refresh, "refresh", defaultRefresh, "")
-	fs.BoolVar(&opts.version, "version", false, "")
-	fs.BoolVar(&opts.readOnly, "read-only", envOn("SSHWARM_READ_ONLY"), "")
+	fs := globalFlags(&opts, getenv)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
-	err := fs.Parse(args)
+	args = fs.Args()
 
-	return opts, fs.Args(), err
-}
-
-// envOn says whether the environment variable name turns something on: set, but not
-// to a false value like 0 or false. Any other value is on, so that a typo errs on
-// the safe side.
-func envOn(name string) bool {
-	v := os.Getenv(name)
-	on, err := strconv.ParseBool(v)
-
-	return v != "" && (on || err != nil)
-}
-
-// run runs the command first in args, with its own flags and arguments after it.
-// Without a command, it opens the browser.
-func run(opts options, args []string) error {
 	if opts.version {
-		fmt.Println(versionLine())
+		_, err := fmt.Fprintln(stdout, versionLine())
 
-		return nil
+		return err
 	}
 
 	if len(args) == 0 {
-		hosts, err := loadHosts(context.Background(), opts)
+		hosts, err := loadHosts(ctx, opts)
 		if err != nil {
 			return err
 		}
 
-		return ui.Run(hosts, opts.timeout, opts.refresh, opts.readOnly)
+		return ui.Run(ctx, hosts, opts.timeout, opts.refresh, opts.readOnly)
 	}
 
 	switch args[0] {
 	case "status":
-		return statusCmd(opts, args[1:])
+		return statusCmd(ctx, opts, args[1:], stdout)
 	case "probe":
-		return probeCmd(opts, args[1:])
-	default:
-		return fmt.Errorf("unknown command %q, see sshwarm --help", args[0])
+		return probeCmd(ctx, opts, args[1:], stdout)
 	}
+
+	return fmt.Errorf("unknown command %q, see sshwarm --help", args[0])
+}
+
+// globalFlags is the flag set of the flags before the command, set into opts; their
+// defaults come from the environment, read with getenv.
+func globalFlags(opts *options, getenv func(string) string) *flag.FlagSet {
+	fs := newFlagSet("sshwarm")
+	fs.StringVar(&opts.hosts, "hosts", getenv("SSHWARM_HOSTS"), "")
+	fs.StringVar(&opts.flake, "flake", getenv("SSHWARM_FLAKE"), "")
+	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "")
+	fs.DurationVar(&opts.refresh, "refresh", defaultRefresh, "")
+	fs.BoolVar(&opts.version, "version", false, "")
+	fs.BoolVar(&opts.readOnly, "read-only", envOn(getenv("SSHWARM_READ_ONLY")), "")
+
+	return fs
+}
+
+// envOn says whether an environment variable's value v turns something on: set, but
+// not to a false value like 0 or false. Any other value is on, so that a typo errs
+// on the safe side.
+func envOn(v string) bool {
+	on, err := strconv.ParseBool(v)
+
+	return v != "" && (on || err != nil)
 }
 
 const statusHelp = `Usage: sshwarm [flags] status [--format text|json] [machine...]
@@ -125,42 +131,47 @@ be selected by substrings of their name. All machines by default.
   --format text|json   output format. Text by default.
 `
 
-// statusCmd prints the machines table, then their problems, if any.
-func statusCmd(opts options, args []string) error {
+// statusFlags is the status command's flag set, and its format flag.
+func statusFlags() (*flag.FlagSet, *string) {
 	fs := newFlagSet("status")
-	format := fs.String("format", "text", "")
 
+	return fs, fs.String("format", "text", "")
+}
+
+// statusCmd prints the machines table, then their problems, if any.
+func statusCmd(ctx context.Context, opts options, args []string, stdout io.Writer) error {
+	fs, format := statusFlags()
 	if err := fs.Parse(args); err != nil {
-		return helpOr(err, statusHelp)
+		return helpOr(err, statusHelp, stdout)
 	}
 
 	if *format != "text" && *format != "json" {
 		return fmt.Errorf("unknown format %q: text or json", *format)
 	}
 
-	ctx := context.Background()
-
 	hosts, err := loadHosts(ctx, opts)
 	if err != nil {
 		return err
 	}
 
-	hosts = swarm.Select(hosts, fs.Args())
+	hosts = inventory.Select(hosts, fs.Args())
 	if len(hosts) == 0 {
 		return fmt.Errorf("no machine matches %v", fs.Args())
 	}
 
 	reports := swarm.ProbeAll(ctx, hosts, opts.timeout)
 
-	ok := true
+	var ok bool
 
 	switch *format {
 	case "text":
-		ok = ui.PrintStatus(os.Stdout, reports)
+		ok, err = ui.PrintStatus(stdout, reports)
 	case "json":
-		if ok, err = ui.PrintStatusJSON(os.Stdout, reports); err != nil {
-			return err
-		}
+		ok, err = ui.PrintStatusJSON(stdout, reports)
+	}
+
+	if err != nil {
+		return err
 	}
 
 	if !ok {
@@ -177,46 +188,46 @@ can be referenced by a substring of its name.
 `
 
 // probeCmd prints one machine's raw probe output, for debugging and test fixtures.
-func probeCmd(opts options, args []string) error {
+func probeCmd(ctx context.Context, opts options, args []string, stdout io.Writer) error {
 	fs := newFlagSet("probe")
 	if err := fs.Parse(args); err != nil {
-		return helpOr(err, probeHelp)
+		return helpOr(err, probeHelp, stdout)
 	}
 
 	if fs.NArg() != 1 {
 		return errors.New("probe takes one machine")
 	}
 
-	hosts, err := loadHosts(context.Background(), opts)
+	hosts, err := loadHosts(ctx, opts)
 	if err != nil {
 		return err
 	}
 
-	i, err := swarm.Find(hosts, fs.Arg(0))
+	i, err := inventory.Find(hosts, fs.Arg(0))
 	if err != nil {
 		return err
 	}
 
-	out, err := swarm.RunProbe(context.Background(), hosts[i], opts.timeout)
+	out, err := swarm.RunProbe(ctx, hosts[i], opts.timeout)
 	if err != nil {
 		return err
 	}
 
-	fmt.Print(out)
+	_, err = io.WriteString(stdout, out)
 
-	return nil
+	return err
 }
 
-// helpOr prints a command's help if err asks for it (-h, --help), and then there's
-// nothing more to do; else it's err.
-func helpOr(err error, help string) error {
+// helpOr writes a command's help to w if err asks for it (-h, --help), and then
+// there's nothing more to do; else it's err.
+func helpOr(err error, help string, w io.Writer) error {
 	if !errors.Is(err, flag.ErrHelp) {
 		return err
 	}
 
-	fmt.Print(help)
+	_, err = io.WriteString(w, help)
 
-	return nil
+	return err
 }
 
 // newFlagSet returns a flag set that prints nothing: main prints the error, or
@@ -229,19 +240,20 @@ func newFlagSet(name string) *flag.FlagSet {
 }
 
 // loadHosts loads the machines, from the hosts file or else the flake.
-func loadHosts(ctx context.Context, opts options) ([]swarm.Host, error) {
+func loadHosts(ctx context.Context, opts options) ([]inventory.Host, error) {
 	switch {
 	case opts.hosts != "":
-		return swarm.LoadFile(opts.hosts)
+		return inventory.LoadFile(opts.hosts)
 	case opts.flake != "":
-		return swarm.LoadFlake(ctx, opts.flake)
+		return inventory.LoadFlake(ctx, opts.flake)
 	}
 
-	return nil, errors.New("No hosts provided. Use --hosts <file> or --flake <dir>, or set SSHWARM_HOSTS or SSHWARM_FLAKE")
+	return nil, errors.New("no hosts provided: use --hosts <file> or --flake <dir>, or set SSHWARM_HOSTS or SSHWARM_FLAKE")
 }
 
-func usage() {
-	fmt.Printf(`Usage: sshwarm [flags] [command] [machine...]
+// usage writes sshwarm's help to w.
+func usage(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `Usage: sshwarm [flags] [command] [machine...]
 
   (no command)          browse the machines, their services, stacks and logs
   status [machine...]   print the machines table; exit 1 on any problem
@@ -271,6 +283,8 @@ Hosts file, one [[host]] per machine. ssh looks up its host, or else its name, i
   user = "deploy"
   key  = "~/.ssh/web"
 `, defaultTimeout, defaultRefresh)
+
+	return err
 }
 
 // versionLine is "sshwarm x.y.z (<commit>)".

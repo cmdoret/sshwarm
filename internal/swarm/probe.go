@@ -16,6 +16,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cmdoret/sshwarm/internal/inventory"
+	"github.com/cmdoret/sshwarm/internal/remote"
 )
 
 //go:embed probe.sh
@@ -23,24 +26,20 @@ var probeScript string
 
 // ProbeAll probes the hosts in parallel, each within timeout. The reports keep the
 // hosts' order.
-func ProbeAll(ctx context.Context, hosts []Host, timeout time.Duration) []Report {
+func ProbeAll(ctx context.Context, hosts []inventory.Host, timeout time.Duration) []Report {
 	reports := make([]Report, len(hosts))
 
 	var wg sync.WaitGroup
 
 	for i, h := range hosts {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			out, err := RunProbe(ctx, h, timeout)
 			if err == nil {
 				reports[i], err = Parse(out)
 			}
 
 			reports[i].Host, reports[i].Err = h, err
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -50,24 +49,24 @@ func ProbeAll(ctx context.Context, hosts []Host, timeout time.Duration) []Report
 
 // RunProbe returns the probe's raw output, without control characters. It gives
 // up after timeout.
-func RunProbe(ctx context.Context, h Host, timeout time.Duration) (string, error) {
+func RunProbe(ctx context.Context, h inventory.Host, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// The probe stops on its own on the host, a bit before we give up: without a
 	// terminal, killing ssh wouldn't stop a command stuck there.
 	onHost := max(int(timeout.Seconds())-2, 1)
-	cmd := sshCmd(ctx, h, false, fmt.Sprintf("timeout %d bash -s", onHost))
+	cmd := remote.Command(ctx, h, false, fmt.Sprintf("timeout %d bash -s", onHost))
 	cmd.Stdin = strings.NewReader(probeScript)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	raw, err := cmd.Output()
-	out := clean(string(raw))
+	out := remote.Clean(string(raw))
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", errors.New("timed out")
+		return "", fmt.Errorf("timed out after %v", timeout)
 	}
 
 	if err == nil || errors.Is(err, exec.ErrWaitDelay) {
@@ -106,6 +105,7 @@ func Parse(out string) (Report, error) {
 	}
 
 	kv := keyValues(meta)
+	bad := misread{}
 	r := Report{
 		OS:            kv["os"],
 		Revision:      kv["revision"],
@@ -115,9 +115,9 @@ func Parse(out string) (Report, error) {
 		Load:          usage(kv["load"]),
 		Memory:        usage(kv["memory"]),
 		Disk:          usage(kv["disk"]),
-		Docker:        kv["docker"],
-		Units:         withUnloaded(parseUnits(sec["units"]), sec["unit-files"]),
-		Stacks:        parseStacks(sec["containers"], parseTimes(sec["times"])),
+		Docker:        Docker(kv["docker"]),
+		Units:         withUnloaded(parseUnits(sec["units"], bad), sec["unit-files"], bad),
+		Stacks:        parseStacks(sec["containers"], parseStates(sec["states"], bad), bad),
 	}
 
 	if up, err := strconv.ParseFloat(kv["uptime"], 64); err == nil {
@@ -128,6 +128,10 @@ func Parse(out string) (Report, error) {
 		if cmd, ok := strings.CutPrefix(name, "error "); ok {
 			r.Errors = append(r.Errors, cmd+": "+oneLine(text))
 		}
+	}
+
+	for name, n := range bad {
+		r.Errors = append(r.Errors, fmt.Sprintf("%s: %d unreadable lines", name, n))
 	}
 
 	slices.Sort(r.Errors)
@@ -147,13 +151,27 @@ func sections(out string) map[string]string {
 	return s
 }
 
+// misread counts, per section of the probe's output, the lines that don't read: a
+// sign that the output of docker or systemd changed, where skipping them would
+// pass for having nothing to show.
+type misread map[string]int
+
+// note counts line, of section, as misread, unless it's blank.
+func (m misread) note(section, line string) {
+	if strings.TrimSpace(line) != "" {
+		m[section]++
+	}
+}
+
 // parseUnits reads systemctl show's output: a block of properties per unit.
-func parseUnits(raw string) []Unit {
+func parseUnits(raw string, bad misread) []Unit {
 	var units []Unit
 
-	for _, block := range strings.Split(raw, "\n\n") {
+	for block := range strings.SplitSeq(raw, "\n\n") {
 		p := keyValues(block)
 		if p["Id"] == "" {
+			bad.note("units", block)
+
 			continue
 		}
 
@@ -170,15 +188,21 @@ func parseUnits(raw string) []Unit {
 // withUnloaded adds to units the installed units systemd hasn't loaded, from
 // systemctl list-unit-files (name, then state, per line): inactive. Templates
 // (foo@.service) and aliases aren't units of their own.
-func withUnloaded(units []Unit, raw string) []Unit {
+func withUnloaded(units []Unit, raw string, bad misread) []Unit {
 	loaded := map[string]bool{}
 	for _, u := range units {
 		loaded[u.Name] = true
 	}
 
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		f := strings.Fields(line)
-		if len(f) < 2 || loaded[f[0]] || strings.HasSuffix(f[0], "@.service") || f[1] == "alias" {
+		if len(f) < 2 {
+			bad.note("unit-files", line)
+
+			continue
+		}
+
+		if loaded[f[0]] || strings.HasSuffix(f[0], "@.service") || f[1] == "alias" {
 			continue
 		}
 
@@ -189,14 +213,21 @@ func withUnloaded(units []Unit, raw string) []Unit {
 }
 
 // parseStacks groups the containers (project, name, state, status per line) by
-// compose project, with when each last started or stopped (parseTimes).
-func parseStacks(raw string, since map[string]time.Time) []Stack {
+// compose project, with what docker inspect says of each (parseStates).
+func parseStacks(raw string, states map[string]Container, bad misread) []Stack {
 	byName := map[string][]Container{}
 
-	for _, line := range strings.Split(raw, "\n") {
-		if f := strings.Split(line, "\t"); len(f) == 4 && f[0] != "" {
-			byName[f[0]] = append(byName[f[0]], Container{Name: f[1], State: f[2], Status: f[3], Since: since[f[1]]})
+	for line := range strings.SplitSeq(raw, "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) != 4 || f[0] == "" {
+			bad.note("containers", line)
+
+			continue
 		}
+
+		c := states[f[1]]
+		c.Name, c.State, c.Status = f[1], f[2], f[3]
+		byName[f[0]] = append(byName[f[0]], c)
 	}
 
 	var out []Stack
@@ -207,40 +238,55 @@ func parseStacks(raw string, since map[string]time.Time) []Stack {
 	return out
 }
 
-// parseTimes reads when each container last started and stopped (/name, then both
-// times per line), keeping the later: when it last changed state. A container that
-// never ran has docker's zero time for both, the zero time.
-func parseTimes(raw string) map[string]time.Time {
-	since := map[string]time.Time{}
+// stateFormat is what docker inspect says of a container, for parseStates: its
+// name, when it last started and stopped, its last exit code, and its health, "-"
+// without a healthcheck. probe.sh has it too.
+const stateFormat = `{{.Name}} {{.State.StartedAt}} {{.State.FinishedAt}} {{.State.ExitCode}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}`
 
-	for _, line := range strings.Split(raw, "\n") {
+// parseStates reads docker inspect's lines in stateFormat, into containers by name:
+// their health, last exit code, and since when they're in their state, the later
+// of the two times. A container that never ran has docker's zero time for both,
+// the zero time.
+func parseStates(raw string, bad misread) map[string]Container {
+	states := map[string]Container{}
+
+	for line := range strings.SplitSeq(raw, "\n") {
 		f := strings.Fields(line)
-		if len(f) != 3 {
+		if len(f) != 5 {
+			bad.note("states", line)
+
 			continue
 		}
 
 		started, err1 := time.Parse(time.RFC3339Nano, f[1])
 		stopped, err2 := time.Parse(time.RFC3339Nano, f[2])
-		if err1 != nil || err2 != nil {
+		code, err3 := strconv.Atoi(f[3])
+		if err1 != nil || err2 != nil || err3 != nil {
+			bad.note("states", line)
+
 			continue
 		}
 
-		last := started
+		c := Container{Name: strings.TrimPrefix(f[0], "/"), ExitCode: code, Since: started}
 		if stopped.After(started) { // exited, or waiting to restart
-			last = stopped
+			c.Since = stopped
 		}
 
-		since[strings.TrimPrefix(f[0], "/")] = last
+		if f[4] != "-" {
+			c.Health = f[4]
+		}
+
+		states[c.Name] = c
 	}
 
-	return since
+	return states
 }
 
 // keyValues reads key=value lines.
 func keyValues(s string) map[string]string {
 	kv := map[string]string{}
 
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if k, v, ok := strings.Cut(line, "="); ok {
 			kv[k] = v
 		}
@@ -249,15 +295,15 @@ func keyValues(s string) map[string]string {
 	return kv
 }
 
-// usage reads a percentage the probe computed; -1 when it couldn't, as 0% would
+// usage reads a percentage the probe computed; nil when it couldn't, as 0% would
 // pass for a fine machine. Some awks print inf or nan for a division by zero.
-func usage(s string) float64 {
+func usage(s string) *float64 {
 	n, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	if err != nil || math.IsInf(n, 0) || math.IsNaN(n) {
-		return -1
+		return nil
 	}
 
-	return n
+	return &n
 }
 
 // unix reads seconds since the epoch; zero or anything else is the zero time.

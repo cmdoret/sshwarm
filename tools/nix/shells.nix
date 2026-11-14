@@ -5,6 +5,8 @@ let
   baseTools = with pkgs; [
     eza
     go
+    golangci-lint
+    govulncheck
     just
     nixfmt
     nushell

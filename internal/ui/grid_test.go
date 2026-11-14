@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
+	"github.com/cmdoret/sshwarm/internal/inventory"
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
@@ -25,7 +26,7 @@ func TestTones(t *testing.T) {
 			t.Errorf("machine cell %d %q: tone %v, want %v", i, m.cells[i].text, m.cells[i].tone, want)
 		}
 	}
-	if down := machineRow(swarm.Report{Host: swarm.Host{Name: "x"}, Err: errTest}); down.tone != bad {
+	if down := machineRow(swarm.Report{Host: inventory.Host{Name: "x"}, Err: errTest}); down.tone != bad {
 		t.Error("down machine not red")
 	}
 	if state := machineRow(swarm.Report{Errors: []string{"version: not found"}}).cells[1].text; state != "degraded" {
@@ -59,7 +60,7 @@ func TestTones(t *testing.T) {
 	if s := stacks["utils"]; s.tone != inherit || s.cells[0].tone != good {
 		t.Errorf("healthy stack (init container done): %+v", s)
 	}
-	starting := swarm.Stack{Name: "s", Containers: []swarm.Container{{State: "running", Status: "Up 3 seconds (health: starting)"}}}
+	starting := swarm.Stack{Name: "s", Containers: []swarm.Container{{State: "running", Status: "Up 3 seconds (health: starting)", Health: "starting"}}}
 	if s := stackRow(r, starting); s.tone != inherit || s.cells[0].tone != warn {
 		t.Errorf("starting stack: %+v", s)
 	}
@@ -68,10 +69,8 @@ func TestTones(t *testing.T) {
 // Units list failed first, then by name ignoring case.
 func TestServiceOrder(t *testing.T) {
 	units := []swarm.Unit{{Name: "zed.service"}, {Name: "NetworkManager.service"}, {Name: "avahi.service"}, {Name: "x.service", Active: "failed"}}
-	m := &model{all: true, reports: []swarm.Report{{Units: units}}}
-
 	var got []string
-	for _, r := range serviceRows(m, 0, "") {
+	for _, r := range serviceRows(swarm.Report{Units: units}, true) {
 		got = append(got, r.key)
 	}
 
@@ -88,7 +87,7 @@ func TestGridRender(t *testing.T) {
 	r := fixture(t)
 	g := grid{titles: machineTitles}
 	g.width, g.height = 120, 6
-	g.setRows([]row{machineRow(r), machineRow(swarm.Report{Host: swarm.Host{Name: "garage-node-neatus"}, Err: errTest})})
+	g.setRows([]row{machineRow(r), machineRow(swarm.Report{Host: inventory.Host{Name: "garage-node-neatus"}, Err: errTest})})
 	g.key(tea.KeyMsg{Type: tea.KeyDown})
 
 	v := g.view()

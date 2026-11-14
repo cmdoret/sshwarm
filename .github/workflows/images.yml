@@ -1,8 +1,9 @@
 ---
 name: Images
 on:
-  pull_request:
+  pull_request: # only when what builds the images changes; Go is built by Checks
     branches: [main]
+    paths: ["tools/nix/**", "flake.nix", "flake.lock"]
   push:
     branches: [main]
   release:
