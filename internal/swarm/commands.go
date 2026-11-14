@@ -55,8 +55,9 @@ func UnitAction(v Verb, unit string) string {
 	return asRoot("systemctl --no-block " + string(v) + " " + quote(unit))
 }
 
-// Reboot is the command that reboots a machine, for Run, 2 seconds later: once ssh
-// has ended. systemctl by its full path, which systemd's own may lack (NixOS).
+// Reboot is the command that reboots a machine, for remote.Run, 2 seconds later:
+// once ssh has ended. It names systemctl by its full path, which systemd's own
+// search path may lack (NixOS).
 func Reboot() string {
 	return asRoot(`systemd-run --on-active=2 --timer-property=AccuracySec=1s "$(command -v systemctl)" reboot`)
 }

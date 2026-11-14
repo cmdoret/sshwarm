@@ -190,12 +190,14 @@ type UnitInfo struct {
 	CPUTime           time.Duration
 	Tasks             uint64
 
-	Journal []string // its last lines
+	Journal []string  // its last lines
+	Now     time.Time // the host's clock, when described: ages are computed against it
 }
 
 // DescribeUnit is the describe command of a systemd unit, for ParseUnit.
 func DescribeUnit(unit string) string {
 	return inSections(
+		[2]string{"now", "date +%s"},
 		[2]string{"show", "systemctl show --timestamp=unix -p " +
 			"Id,Description,ActiveState,SubState,Result,UnitFileState,StateChangeTimestamp," +
 			"FragmentPath,MainPID,ExecMainStatus,NRestarts,Restart,TriggeredBy," +
@@ -216,7 +218,7 @@ func ParseUnit(out string) (UnitInfo, error) {
 
 	p := keyValues(sec["show"])
 	u := UnitInfo{
-		Unit: units[0], File: p["FragmentPath"], Restart: p["Restart"], TriggeredBy: p["TriggeredBy"],
+		Unit: units[0], Now: unix(sec["now"]), File: p["FragmentPath"], Restart: p["Restart"], TriggeredBy: p["TriggeredBy"],
 		MainPID: int(count(p["MainPID"])), ExitStatus: int(count(p["ExecMainStatus"])), Restarts: int(count(p["NRestarts"])),
 		Memory: count(p["MemoryCurrent"]), MemoryMax: count(p["MemoryMax"]),
 		CPUTime: time.Duration(count(p["CPUUsageNSec"])), Tasks: count(p["TasksCurrent"]),
@@ -335,13 +337,15 @@ type ContainerInfo struct {
 	Ports, Networks, Mounts []string
 	EnvNames                []string
 	CPUs                    int
-	Stats                   *Stats // nil unless docker stats answered
+	Stats                   *Stats    // nil unless docker stats answered
+	Now                     time.Time // the host's clock, when described: ages are computed against it
 }
 
 // DescribeContainer is the describe command of a container, for ParseContainer:
 // what it uses, then everything docker knows about it.
 func (d Docker) DescribeContainer(container string) string {
 	return inSections(
+		[2]string{"now", "date +%s"},
 		[2]string{"cpus", "getconf _NPROCESSORS_ONLN"},
 		[2]string{"stats", string(d) + ` stats --no-stream --format '{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}' ` + quote(container)},
 		[2]string{"inspect", string(d) + " inspect " + quote(container)},
@@ -399,7 +403,7 @@ func ParseContainer(out string) (ContainerInfo, error) {
 		Project:   in.Config.Labels["com.docker.compose.project"], Service: in.Config.Labels["com.docker.compose.service"],
 		Running: in.State.Running, StartedAt: in.State.StartedAt,
 		Restarts: in.RestartCount, RestartPolicy: in.HostConfig.RestartPolicy.Name,
-		CPUs: int(count(sec["cpus"])),
+		CPUs: int(count(sec["cpus"])), Now: unix(sec["now"]),
 	}
 
 	if h := in.State.Health; h != nil {
