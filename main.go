@@ -33,9 +33,9 @@ var version, commit string
 
 // options are the global flags, given before the command.
 type options struct {
-	hosts, flake     string
-	timeout, refresh time.Duration
-	version          bool
+	hosts, flake      string
+	timeout, refresh  time.Duration
+	version, readOnly bool
 }
 
 func main() {
@@ -71,6 +71,7 @@ func parseGlobal(args []string) (options, []string, error) {
 	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "")
 	fs.DurationVar(&opts.refresh, "refresh", defaultRefresh, "")
 	fs.BoolVar(&opts.version, "version", false, "")
+	fs.BoolVar(&opts.readOnly, "read-only", os.Getenv("SSHWARM_READ_ONLY") != "", "")
 
 	err := fs.Parse(args)
 
@@ -92,7 +93,7 @@ func run(opts options, args []string) error {
 			return err
 		}
 
-		return ui.Run(hosts, opts.timeout, opts.refresh)
+		return ui.Run(hosts, opts.timeout, opts.refresh, opts.readOnly)
 	}
 
 	switch args[0] {
@@ -198,6 +199,7 @@ Flags, before the command:
   --flake <dir>          without --hosts, the flake defining deploy.nodes (default: $SSHWARM_FLAKE, or .)
   --timeout <duration>   probe timeout, per machine (default: %v)
   --refresh <duration>   how often the browser refreshes (default: %v)
+  --read-only            no actions: don't start, stop or restart anything (default: $SSHWARM_READ_ONLY set)
   --version              print the version and the commit it was built from
 
 Hosts file, one [[host]] per machine. ssh looks up its host, or else its name, in
