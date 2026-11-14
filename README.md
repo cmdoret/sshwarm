@@ -12,8 +12,9 @@ Tired of ssh-ing into box after box to find out what's deployed where, which ser
 overnight and which container is crash-looping? **sshwarm** shows the whole swarm at a
 glance, with the logs of whatever is red a keypress away.
 
-- **Every machine, one table:** uptime, pending reboot, systemd units, compose stacks, system resources.
+- **In depth overview:** uptime, pending reboot, systemd units, compose stacks, system resources.
 - **Agentless:** a small bash probe over your own `ssh`, with your keys, agent and `~/.ssh/config`. Nothing to install on the machines.
+- **Quick actions:** start, stop or restart a service, stack or container.
 - **Scriptable:** `sshwarm status` prints the table and exits 1 when anything is wrong.
 
 ## Get it
@@ -36,6 +37,10 @@ Linux machines with systemd and bash, reachable over ssh without a password prom
 
 - is in the `systemd-journal` group.
 - can run docker without password (either rootless or with passwordless sudo).
+- to start, stop or restart services: is root, or can run `systemctl` with passwordless sudo.
+
+Starting or stopping what something else declares, like a NixOS service or a stack
+run by a systemd unit, only lasts until that something applies its own state again.
 
 ## Use
 
