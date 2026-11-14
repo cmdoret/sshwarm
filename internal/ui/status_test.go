@@ -31,6 +31,7 @@ func TestPrintStatus(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
+		"app-node-argiope disk 93% full",
 		"app-node-argiope failed: broken.service",
 		"app-node-argiope stack immich: immich_server running (Up 2 hours (unhealthy))",
 		"app-node-argiope stack cook: cook-cookcli-1 exited (Exited (1) 5 minutes ago)",

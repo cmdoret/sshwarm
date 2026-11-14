@@ -91,7 +91,7 @@ func (c *card) table(titles []string, rows []row) {
 	}
 
 	for _, l := range strings.Split(g.view(), "\n") {
-		c.line(l) // a narrow card would leave its last column too little
+		c.line(l)
 	}
 }
 
@@ -113,7 +113,7 @@ func barCell(f float64, text string) cell {
 }
 
 // usageTone rates how much of something is used: fine below 70%, a warning below
-// 90%, then bad.
+// 90%, then bad. From 90%, a disk is also one of a machine's problems (swarm.FullDisk).
 func usageTone(f float64) tone {
 	switch {
 	case f >= 0.9:

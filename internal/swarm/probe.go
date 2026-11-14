@@ -200,10 +200,10 @@ func keyValues(s string) map[string]string {
 }
 
 // usage reads a percentage the probe computed; -1 when it couldn't, as 0% would
-// pass for a fine machine.
+// pass for a fine machine. Some awks print inf or nan for a division by zero.
 func usage(s string) float64 {
 	n, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil {
+	if err != nil || math.IsInf(n, 0) || math.IsNaN(n) {
 		return -1
 	}
 

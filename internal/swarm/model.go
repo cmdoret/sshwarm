@@ -112,14 +112,21 @@ func (s Stack) Bad() []Container {
 	return out
 }
 
-// Problems lists what's wrong: the host is down, or failed commands, failed
-// units, containers not OK.
+// FullDisk is the use, in percent, from which the fullest disk is a problem.
+const FullDisk = 90
+
+// Problems lists what's wrong: the host is down, or failed commands, a disk nearly
+// full, failed units, containers not OK.
 func (r Report) Problems() []string {
 	if r.Err != nil {
 		return []string{"down: " + r.Err.Error()}
 	}
 
 	out := slices.Clone(r.Errors)
+
+	if r.Disk >= FullDisk {
+		out = append(out, fmt.Sprintf("disk %.0f%% full", r.Disk))
+	}
 
 	if failed := r.Failed(); len(failed) > 0 {
 		var names []string
