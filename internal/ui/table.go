@@ -165,13 +165,13 @@ func (t *table) ask(m *model, a action) {
 
 	r := m.reports[host]
 
-	a = t.kind.act(r, a, key)
-	if a.cmd == "" {
+	a, ok = t.kind.act(r, a, key)
+	if !ok {
 		return
 	}
 
 	a.host = r.Host
-	m.confirm = &a
+	m.pending = &a
 }
 
 // show runs the command that command gives for the row under the cursor, and shows
@@ -241,7 +241,7 @@ func (t *table) view(m *model) string {
 
 	help := t.kind.help
 	if !m.readOnly {
-		help += " · " + t.kind.actions
+		help += " · " + t.kind.actionHelp
 	}
 
 	if t.grid.hidden() > 0 {

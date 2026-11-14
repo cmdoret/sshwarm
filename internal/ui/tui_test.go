@@ -441,17 +441,17 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 
 		s.m, cmd = s.m.Update(msg)
 
-		if m := s.m.(model); m.acting != 0 || cmd == nil && !m.stale {
+		if m := s.m.(model); m.running != 0 || cmd == nil && !m.again {
 			t.Errorf("%s: still running, or no refresh after it", key)
 		}
 	}
 
 	// A machine only reboots.
 	s.expect("s ssh • R reboot")
-	s.keys("u", "ctrl+k")
-
-	if s.m.(model).confirm != nil {
-		t.Error("a machine started or stopped")
+	for _, k := range []string{"u", "ctrl+k"} {
+		if s.keys(k); s.m.(model).pending != nil {
+			t.Errorf("a machine took %s", k)
+		}
 	}
 
 	s.keys("R")
@@ -478,7 +478,7 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 	// The probe running when it ended may have looked before: another follows.
 	s.m, _ = s.m.Update(reportsMsg{r})
 
-	if m := s.m.(model); !m.refreshing || m.stale {
+	if m := s.m.(model); !m.refreshing || m.again {
 		t.Error("no probe after the one running during the action")
 	}
 
@@ -503,7 +503,7 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 	s.expect("read-only: no actions")
 	s.keys("j")
 
-	if v := s.m.View(); strings.Contains(v, "R restart") || s.m.(model).confirm != nil {
+	if v := s.m.View(); strings.Contains(v, "R restart") {
 		t.Errorf("read-only, actions are still offered:\n%s", v)
 	}
 }

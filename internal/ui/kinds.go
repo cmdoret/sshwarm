@@ -14,7 +14,7 @@ import (
 )
 
 // kind is a resource the tables list: its names, columns and rows, and what enter,
-// l, d and s do on a row, found by its key.
+// l, d, s and the action keys do on a row, found by its key.
 type kind struct {
 	names  []string // the first is the tab's name; all of them work in the command bar
 	help   string   // its own keys, for the help line
@@ -29,10 +29,10 @@ type kind struct {
 	card     cardFunc                                             // draws describe's output
 	shell    func(r swarm.Report, key string) (remote string)     // "": a login shell; nil: no shell
 
-	// act says what a, asked for with its key, does to the row's thing, key: what and
-	// the command; or else, if the kind has no such action, no command.
-	act     func(r swarm.Report, a action, key string) action
-	actions string // the keys act takes, for the help line
+	// act fills in what a, from actionKeys, does to the row about key: what it acts
+	// on, and the command. It's not ok if the kind has no such action.
+	act        func(r swarm.Report, a action, key string) (action, bool)
+	actionHelp string // the action keys act takes, for the help line
 }
 
 // action is a start, stop or restart (or reboot) of what a row is about: asked for
@@ -50,8 +50,8 @@ var actionKeys = map[string]action{
 	"R":      {verb: "restart", done: "restarted"},
 }
 
-// rowActions is the action keys of what runs on a machine, for the help line.
-const rowActions = "u start · ^k stop · R restart"
+// rowActionHelp is the action keys of what runs on a machine, for the help line.
+const rowActionHelp = "u start · ^k stop · R restart"
 
 // on says where what is: on r's machine.
 func on(r swarm.Report, what string) string { return what + " on " + r.Host.Name }
@@ -100,14 +100,14 @@ var machines = &kind{
 	shell:    func(swarm.Report, string) string { return "" },
 	describe: func(swarm.Report, string) (string, string) { return "describe", swarm.DescribeMachine() },
 	card:     machineCard,
-	act: func(r swarm.Report, a action, _ string) action {
+	act: func(r swarm.Report, a action, _ string) (action, bool) {
 		if a.verb != "restart" { // can't be started over ssh, nor started again once stopped
-			return action{}
+			return action{}, false
 		}
 
-		return action{verb: "reboot", done: "rebooting", what: r.Host.Name, cmd: swarm.Reboot()}
+		return action{verb: "reboot", done: "rebooting", what: r.Host.Name, cmd: swarm.Reboot()}, true
 	},
-	actions: "R reboot",
+	actionHelp: "R reboot",
 }
 
 // machineTitles head the machines table: `sshwarm status` prints all but PROBLEMS.
@@ -183,12 +183,12 @@ var services = &kind{
 		return "describe " + unit, swarm.DescribeUnit(unit)
 	},
 	card: unitCard,
-	act: func(r swarm.Report, a action, unit string) action {
+	act: func(r swarm.Report, a action, unit string) (action, bool) {
 		a.what, a.cmd = on(r, unit), swarm.UnitAction(a.verb, unit)
 
-		return a
+		return a, true
 	},
-	actions: rowActions,
+	actionHelp: rowActionHelp,
 }
 
 // serviceRows lists a machine's interesting units, failed first; with m.all, every
@@ -280,12 +280,12 @@ var stacks = &kind{
 		return "describe stack " + stack, swarm.DescribeStack(r.Docker, stack)
 	},
 	card: stackCard,
-	act: func(r swarm.Report, a action, stack string) action {
+	act: func(r swarm.Report, a action, stack string) (action, bool) {
 		a.what, a.cmd = on(r, "stack "+stack), swarm.StackAction(r.Docker, a.verb, stack)
 
-		return a
+		return a, true
 	},
-	actions: rowActions,
+	actionHelp: rowActionHelp,
 }
 
 // containers lists a machine's compose containers, or one stack's.
@@ -320,12 +320,12 @@ var containers = &kind{
 	},
 	card:  containerCard,
 	shell: func(r swarm.Report, name string) string { return swarm.ContainerShell(r.Docker, name) },
-	act: func(r swarm.Report, a action, name string) action {
+	act: func(r swarm.Report, a action, name string) (action, bool) {
 		a.what, a.cmd = on(r, "container "+name), swarm.ContainerAction(r.Docker, a.verb, name)
 
-		return a
+		return a, true
 	},
-	actions: rowActions,
+	actionHelp: rowActionHelp,
 }
 
 func stackRow(r swarm.Report, s swarm.Stack) row {

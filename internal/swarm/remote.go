@@ -76,10 +76,11 @@ func ContainerShell(docker, container string) string {
 func UnitAction(verb, unit string) string { return asRoot("systemctl " + verb + " " + quote(unit)) }
 
 // Reboot is the command that reboots a machine, for Run. systemctl returns as soon as
-// the reboot is under way, so that ssh hears it ended before the machine goes down.
+// the reboot is under way: usually in time for ssh to hear so before the machine
+// goes down.
 func Reboot() string { return asRoot("systemctl reboot") }
 
-// asRoot runs cmd as root: directly if the user is root, as sudo may not be
+// asRoot is cmd, run as root: directly if the user is root, as sudo may not be
 // installed; else through sudo, which mustn't ask for a password: without a
 // terminal, nothing can ask for one. Never both: a cmd that failed would run twice.
 // In sh, whatever the user's shell.
@@ -87,14 +88,14 @@ func asRoot(cmd string) string {
 	return "sh -c " + quote(`if [ "$(id -u)" = 0 ]; then `+cmd+"; else sudo -n "+cmd+"; fi")
 }
 
-// StackAction is the command that starts, stops or restarts (verb) a compose
-// stack's containers, for Run. docker: see StackLogs.
+// StackAction is the command that starts, stops or restarts a compose stack's
+// containers, for Run. docker: see StackLogs.
 func StackAction(docker, verb, stack string) string {
 	return fmt.Sprintf("%s compose -p %s %s", docker, quote(stack), verb)
 }
 
-// ContainerAction is the command that starts, stops or restarts (verb) a container,
-// for Run. docker: see StackLogs.
+// ContainerAction is the command that starts, stops or restarts a container, for
+// Run. docker: see StackLogs.
 func ContainerAction(docker, verb, container string) string {
 	return fmt.Sprintf("%s %s %s", docker, verb, quote(container))
 }

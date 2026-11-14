@@ -54,12 +54,7 @@ type (
 	tickMsg      int                 // refresh generation, so a manual refresh doesn't double the timer
 	shellDoneMsg struct{ err error } // a shell ended, with the error of ssh, or of what it ran
 
-	// actionDoneMsg is how an action ended: its output, and its error if it failed.
-	actionDoneMsg struct {
-		action
-		out string
-		err error
-	}
+	actionDoneMsg string // how an action went, for the message line
 )
 
 // execProcess hands the terminal to a command until it ends. Tests replace it.
@@ -77,9 +72,9 @@ type model struct {
 	spin       spinner.Model // turns while refreshing
 
 	readOnly bool    // no actions
-	confirm  *action // the action asking to be confirmed, if any
-	acting   int     // actions running
-	stale    bool    // an action ended during the probe running: probe again after it
+	pending  *action // the action asking to be confirmed, if any
+	running  int     // actions running
+	again    bool    // a refresh was asked for during the probe running: probe after it
 
 	all           bool // services: show every unit, not only the interesting ones
 	width, height int
@@ -102,9 +97,12 @@ func newModel(ctx context.Context, hosts []swarm.Host, timeout, interval time.Du
 // Init probes the machines a first time.
 func (m model) Init() tea.Cmd { return tea.Batch(m.probe(), m.spin.Tick) }
 
-// refresh probes the machines again, unless a probe is still running.
+// refresh probes the machines again. If a probe is running, it probes once that one
+// is in, as it may have looked before what asked for this one: an action, a shell.
 func (m *model) refresh() tea.Cmd {
 	if m.refreshing {
+		m.again = true
+
 		return nil
 	}
 
@@ -118,7 +116,7 @@ func (m *model) refresh() tea.Cmd {
 func (m model) waiting() bool {
 	t, ok := m.top().(*text)
 
-	return m.refreshing || m.acting > 0 || ok && t.card != nil && t.ch != nil
+	return m.refreshing || m.running > 0 || ok && t.card != nil && t.ch != nil
 }
 
 func (m model) probe() tea.Cmd {
@@ -181,8 +179,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		gen := m.tickGen
 		cmd = tea.Tick(m.interval, func(time.Time) tea.Msg { return tickMsg(gen) })
 
-		if m.stale { // this probe may have looked before an action ended
-			m.stale = false
+		if m.again {
+			m.again = false
 			cmd = tea.Batch(cmd, m.refresh())
 		}
 	case tickMsg:
@@ -206,10 +204,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = t.start(m.ctx, false)
 		}
 	case actionDoneMsg:
-		m.acting--
-		m.flash = msg.result()
-		m.stale = m.refreshing
-		cmd = m.refresh() // what changed shows now, or after the probe running
+		m.running--
+		m.flash = string(msg)
+		cmd = m.refresh() // what changed shows
 	case shellDoneMsg:
 		// The alt screen is back over what the shell printed: say how it ended.
 		if msg.err != nil {
@@ -240,7 +237,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit // Run's context then ends every stream
 	}
 
-	if m.confirm != nil {
+	if m.pending != nil {
 		return m.confirmKey(k)
 	}
 
@@ -277,8 +274,8 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // confirmKey runs the action asked for on y, in the background; any other key
 // cancels it.
 func (m model) confirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	a := *m.confirm
-	m.confirm = nil
+	a := *m.pending
+	m.pending = nil
 
 	if k.String() != "y" {
 		m.flash = "cancelled"
@@ -286,31 +283,31 @@ func (m model) confirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.acting++
+	m.running++
 	ctx := m.ctx
 
 	return m, func() tea.Msg {
 		out, err := swarm.Run(ctx, a.host, a.cmd)
 
-		return actionDoneMsg{a, out, err}
+		return actionDoneMsg(result(a, out, err))
 	}
 }
 
-// result says how an action went: done, or why not, as the last line it printed or
-// else its error.
-func (d actionDoneMsg) result() string {
-	if d.err == nil {
-		return d.done + " " + d.what
+// result says how a went, given its output and error: done, or why not, as the last
+// line it printed or else its error.
+func result(a action, out string, err error) string {
+	if err == nil {
+		return a.done + " " + a.what
 	}
 
-	why := d.err.Error()
+	why := err.Error()
 
-	lines := strings.Split(strings.TrimSpace(d.out), "\n")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if last := lines[len(lines)-1]; last != "" {
 		why = last
 	}
 
-	return fmt.Sprintf("%s %s failed: %s", d.verb, d.what, why)
+	return fmt.Sprintf("%s %s failed: %s", a.verb, a.what, why)
 }
 
 // commandKey types into the command bar: enter goes there, esc cancels.
@@ -481,10 +478,8 @@ func helpLine(help string) string {
 // message if there is one.
 func (m *model) bar() string {
 	switch {
-	case m.confirm != nil:
-		a := m.confirm
-
-		return toneStyles[warn].Render(fmt.Sprintf("%s %s? y/N", a.verb, a.what))
+	case m.pending != nil:
+		return toneStyles[warn].Render(fmt.Sprintf("%s %s? y/N", m.pending.verb, m.pending.what))
 	case m.command.Focused():
 		return m.command.View()
 	case m.flash != "":
@@ -496,8 +491,8 @@ func (m *model) bar() string {
 
 // refreshStatus says when the reports were last refreshed, or what's running.
 func (m model) refreshStatus() string {
-	if m.acting > 0 {
-		return m.spin.View() + dimStyle.Render(fmt.Sprintf(" %d running", m.acting))
+	if m.running > 0 {
+		return m.spin.View() + dimStyle.Render(fmt.Sprintf(" %d running", m.running))
 	}
 
 	if m.refreshing {
