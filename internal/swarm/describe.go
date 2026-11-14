@@ -37,7 +37,7 @@ type Machine struct {
 	CPUs                          int
 	Uptime                        time.Duration
 	Load                          [3]float64 // over 1, 5 and 15 minutes
-	CPUBusy                       float64    // percent of all CPUs busy over a second; -1 without top
+	CPUBusy                       *float64   // percent of all CPUs busy over a second; nil without top
 
 	MemTotal, MemAvailable, SwapTotal, SwapFree uint64 // bytes
 
@@ -90,7 +90,7 @@ func ParseMachine(out string) (Machine, error) {
 		return Machine{}, errors.New("no system section")
 	}
 
-	m := Machine{OS: sys["os"], Kernel: sys["kernel"], Arch: sys["arch"], Virt: sys["virt"], Model: sys["model"], CPUs: cpus, CPUBusy: -1}
+	m := Machine{OS: sys["os"], Kernel: sys["kernel"], Arch: sys["arch"], Virt: sys["virt"], Model: sys["model"], CPUs: cpus}
 
 	if up, err := strconv.ParseFloat(sys["uptime"], 64); err == nil {
 		m.Uptime = time.Duration(up * float64(time.Second))
@@ -148,11 +148,10 @@ func parseDisks(raw string) []Disk {
 }
 
 // parseTop reads top's frame: the CPUs' busy percent, from the idle one on the
-// %Cpu(s) line, and the processes under the PID header line. busy is -1 without it.
+// %Cpu(s) line, and the processes under the PID header line. busy is nil without it.
 // That line's values are 5 wide, with no space of their own: a full one touches
 // the comma before it ("ni,100.0 id"). It's split on commas, not spaces.
-func parseTop(raw string) (busy float64, procs []Process) {
-	busy = -1
+func parseTop(raw string) (busy *float64, procs []Process) {
 	header := false
 
 	for line := range strings.SplitSeq(raw, "\n") {
@@ -164,7 +163,7 @@ func parseTop(raw string) (busy float64, procs []Process) {
 
 			for v := range strings.SplitSeq(values, ",") {
 				if n, name, _ := strings.Cut(strings.TrimSpace(v), " "); name == "id" {
-					busy = 100 - number(n)
+					busy = new(100 - number(n))
 				}
 			}
 		case len(f) > 0 && f[0] == "PID":
@@ -210,7 +209,7 @@ func DescribeUnit(unit string) string {
 func ParseUnit(out string) (UnitInfo, error) {
 	sec := sections(out)
 
-	units := parseUnits(sec["show"])
+	units := parseUnits(sec["show"], misread{}) // the card shows what reads
 	if len(units) == 0 {
 		return UnitInfo{}, errors.New("no unit in systemctl show's output")
 	}
@@ -266,13 +265,17 @@ func projectFilter(stack string) string {
 }
 
 // DescribeStack is the describe command of a compose stack, for ParseStack: its
-// containers, then what the running ones use. Without any container to name,
-// docker stats would list every container: they're named.
+// containers, what docker inspect says of them, then what the running ones use.
+// Without any container to name, docker inspect would fail, and docker stats list
+// every container: they're named.
 func (d Docker) DescribeStack(stack string) string {
+	ids := "ids=$(" + string(d) + " ps -aq " + projectFilter(stack) + `); [ -z "$ids" ] || `
+
 	return inSections(
 		[2]string{"cpus", "getconf _NPROCESSORS_ONLN"},
 		[2]string{"ps", string(d) + " ps -a " + projectFilter(stack) +
 			` --format '{{.Names}}\t{{.Label "com.docker.compose.service"}}\t{{.State}}\t{{.Status}}\t{{.Ports}}'`},
+		[2]string{"states", ids + string(d) + " inspect --format " + quote(stateFormat) + " $ids"},
 		[2]string{"stats", "ids=$(" + string(d) + " ps -q " + projectFilter(stack) + `); [ -z "$ids" ] || ` +
 			string(d) + ` stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}' $ids`},
 	)
@@ -296,6 +299,7 @@ func ParseStack(out string) (StackInfo, error) {
 	}
 
 	s := StackInfo{CPUs: int(count(sec["cpus"]))}
+	states := parseStates(sec["states"], misread{}) // the card shows what reads
 
 	for line := range strings.SplitSeq(ps, "\n") {
 		f := strings.Split(line, "\t")
@@ -303,7 +307,8 @@ func ParseStack(out string) (StackInfo, error) {
 			continue
 		}
 
-		c := Container{Name: f[0], State: f[2], Status: f[3]}
+		c := states[f[0]]
+		c.Name, c.State, c.Status = f[0], f[2], f[3]
 		s.Containers = append(s.Containers, StackContainer{Container: c, Service: f[1], Ports: f[4], Stats: stats[f[0]]})
 	}
 
@@ -317,15 +322,15 @@ func ParseStack(out string) (StackInfo, error) {
 // ContainerInfo is what DescribeContainer found about a container. The values of
 // its environment are left out on purpose: they're often secrets.
 type ContainerInfo struct {
-	Name, Image, Command    string
+	Container // but its Status, which docker inspect doesn't word
+
+	Image, Command          string
 	Project, Service        string // its compose stack and service, if any
-	State                   string // created, running, exited...
 	Running                 bool
-	ExitCode                int
 	StartedAt               time.Time
 	Restarts                int
 	RestartPolicy           string
-	Health, HealthLast      string // its healthcheck's status, and last output; "" without one
+	HealthLast              string // its healthcheck's last output
 	HealthStreak            int    // failed checks in a row
 	Ports, Networks, Mounts []string
 	EnvNames                []string
@@ -388,10 +393,11 @@ func ParseContainer(out string) (ContainerInfo, error) {
 
 	in := found[0]
 	c := ContainerInfo{
-		Name: strings.TrimPrefix(in.Name, "/"), Image: in.Config.Image,
-		Command: strings.Join(slices.Concat(in.Config.Entrypoint, in.Config.Cmd), " "),
-		Project: in.Config.Labels["com.docker.compose.project"], Service: in.Config.Labels["com.docker.compose.service"],
-		State: in.State.Status, Running: in.State.Running, ExitCode: in.State.ExitCode, StartedAt: in.State.StartedAt,
+		Container: Container{Name: strings.TrimPrefix(in.Name, "/"), State: in.State.Status, ExitCode: in.State.ExitCode},
+		Image:     in.Config.Image,
+		Command:   strings.Join(slices.Concat(in.Config.Entrypoint, in.Config.Cmd), " "),
+		Project:   in.Config.Labels["com.docker.compose.project"], Service: in.Config.Labels["com.docker.compose.service"],
+		Running: in.State.Running, StartedAt: in.State.StartedAt,
 		Restarts: in.RestartCount, RestartPolicy: in.HostConfig.RestartPolicy.Name,
 		CPUs: int(count(sec["cpus"])),
 	}
