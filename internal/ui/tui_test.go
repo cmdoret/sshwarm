@@ -391,7 +391,7 @@ func TestSort(t *testing.T) {
 	r := fixture(t)
 	idle := r
 	idle.Host = inventory.Host{Name: "Idle"}
-	idle.Units, idle.Stacks, idle.Disk = nil, nil, 12
+	idle.Units, idle.Stacks, idle.Disk = nil, nil, new(12.0)
 
 	down := swarm.Report{Host: inventory.Host{Name: "down"}, Err: errTest}
 
@@ -433,7 +433,7 @@ func TestSort(t *testing.T) {
 
 	// The cursor stays on its machine through the sorts, and a refresh that
 	// reorders the rows.
-	idle.Disk = 99
+	idle.Disk = new(99.0)
 	s.m, _ = s.m.Update(reportsMsg{idle, r, down})
 	order("Idle", "app-node-argiope", "down")
 	on("Idle")

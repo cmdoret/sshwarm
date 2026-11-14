@@ -60,7 +60,7 @@ func TestTones(t *testing.T) {
 	if s := stacks["utils"]; s.tone != inherit || s.cells[0].tone != good {
 		t.Errorf("healthy stack (init container done): %+v", s)
 	}
-	starting := swarm.Stack{Name: "s", Containers: []swarm.Container{{State: "running", Status: "Up 3 seconds (health: starting)"}}}
+	starting := swarm.Stack{Name: "s", Containers: []swarm.Container{{State: "running", Status: "Up 3 seconds (health: starting)", Health: "starting"}}}
 	if s := stackRow(r, starting); s.tone != inherit || s.cells[0].tone != warn {
 		t.Errorf("starting stack: %+v", s)
 	}

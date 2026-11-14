@@ -164,8 +164,8 @@ func machineCard(out string) (string, error) {
 
 	c.section("Usage")
 
-	if m.CPUBusy >= 0 {
-		c.usage("CPU", m.CPUBusy/100, fmt.Sprintf("%.0f%%", m.CPUBusy))
+	if m.CPUBusy != nil {
+		c.usage("CPU", *m.CPUBusy/100, fmt.Sprintf("%.0f%%", *m.CPUBusy))
 	}
 
 	c.usage("Load", m.Load[0]/float64(max(m.CPUs, 1)), fmt.Sprintf("%.2f %.2f %.2f on %d CPUs", m.Load[0], m.Load[1], m.Load[2], m.CPUs))
@@ -213,7 +213,7 @@ func unitCard(out string) (string, error) {
 
 	var c card
 
-	state := toneStyles[unitTone(u.Active)].Render("● " + u.Active + " (" + u.Sub + ")")
+	state := toneStyles[toneOf(u.Condition())].Render("● " + u.Active + " (" + u.Sub + ")")
 
 	since := ""
 	if !u.Since.IsZero() {
@@ -285,8 +285,8 @@ func stackCard(out string) (string, error) {
 	var rows []row
 
 	for _, sc := range s.Containers {
-		t := containerTone(sc.Container)
-		if sc.OK() {
+		t := toneOf(sc.Condition())
+		if sc.Condition() != swarm.Broken {
 			ok++
 		}
 
@@ -315,16 +315,7 @@ func containerCard(out string) (string, error) {
 
 	var c card
 
-	t := good
-
-	switch {
-	case ci.Health == "unhealthy", ci.State == "restarting", ci.State == "dead", ci.State == "exited" && ci.ExitCode != 0:
-		t = bad
-	case ci.Health == "starting", ci.State == "created", ci.State == "paused":
-		t = warn
-	}
-
-	state := toneStyles[t].Render("● " + ci.State)
+	state := toneStyles[toneOf(ci.Condition())].Render("● " + ci.State)
 	if !ci.Running && ci.ExitCode != 0 {
 		state += toneStyles[bad].Render(fmt.Sprintf(" (exit %d)", ci.ExitCode))
 	}

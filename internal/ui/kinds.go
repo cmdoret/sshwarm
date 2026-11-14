@@ -137,29 +137,18 @@ func machineRow(r swarm.Report) row {
 		reboot = cell{text: "yes", tone: warn, rank: 1}
 	}
 
-	// Units as stacks: how many of those the services tab lists are fine.
-	watched, failed := r.Watched(), len(r.Failed())
+	unitCount, stackCount := counts(r)
+	units, stacks := countCell(unitCount), cell{text: "-"}
 
-	units := cell{text: fmt.Sprintf("%d/%d", watched-failed, watched), rank: float64(failed)}
-	if failed > 0 {
-		units.tone = bad
-	}
-
-	stackCell := cell{text: "-"}
-	if r.Docker != "" {
-		up := r.StacksUp()
-
-		stackCell = cell{text: fmt.Sprintf("%d/%d", up, len(r.Stacks)), rank: float64(len(r.Stacks) - up)}
-		if up < len(r.Stacks) {
-			stackCell.tone = bad
-		}
+	if stackCount != nil {
+		stacks = countCell(*stackCount)
 	}
 
 	return row{key: r.Host.Name, cells: []cell{
 		{text: r.Host.Name},
 		state, deployed,
 		{text: short(r.Uptime), rank: r.Uptime.Seconds()},
-		reboot, units, stackCell,
+		reboot, units, stacks,
 		usageCell(r.Load), usageCell(r.Memory), usageCell(r.Disk),
 		{text: strings.Join(problems, "; "), tone: bad},
 	}}
@@ -199,7 +188,7 @@ func serviceRows(r swarm.Report, all bool) []row {
 	}
 
 	sort.SliceStable(units, func(i, j int) bool {
-		fi, fj := units[i].Active == "failed", units[j].Active == "failed"
+		fi, fj := units[i].Condition() == swarm.Broken, units[j].Condition() == swarm.Broken
 		if fi != fj {
 			return fi
 		}
@@ -223,7 +212,7 @@ func unitRow(r swarm.Report, u swarm.Unit) row {
 		result.tone = bad
 	}
 
-	state := unitTone(u.Active)
+	state := toneOf(u.Condition())
 	line := row{key: u.Name, cells: []cell{dot(state, u.Name), {text: u.Active, tone: state, rank: float64(state)}, {text: u.Sub}, result, age, {text: u.Description}}}
 
 	if state == bad || state == dim { // the whole row: failed stands out, inactive fades
@@ -233,19 +222,18 @@ func unitRow(r swarm.Report, u swarm.Unit) row {
 	return line
 }
 
-// unitTone rates a unit by its active state: failed is bad, changing is a warning,
-// inactive is there, but nothing to see.
-func unitTone(active string) tone {
-	switch active {
-	case "failed":
-		return bad
-	case "activating", "deactivating", "reloading", "refreshing":
+// toneOf colors a condition: idle fades, the others say how things are.
+func toneOf(c swarm.Condition) tone {
+	switch c {
+	case swarm.Idle:
+		return dim
+	case swarm.Warning:
 		return warn
-	case "active":
-		return good
+	case swarm.Broken:
+		return bad
 	}
 
-	return dim
+	return good
 }
 
 // --- stacks and containers --------------------------------------------------
@@ -319,15 +307,12 @@ var containers = &kind{
 }
 
 func stackRow(r swarm.Report, s swarm.Stack) row {
-	worst := good
+	worst := toneOf(s.Condition())
 
 	var problems []string
 
 	for _, c := range s.Containers {
-		t := containerTone(c)
-		worst = max(worst, t)
-
-		if t != good {
+		if c.Condition() != swarm.Fine {
 			problems = append(problems, c.Name+" "+c.Status)
 		}
 	}
@@ -344,7 +329,7 @@ func stackRow(r swarm.Report, s swarm.Stack) row {
 }
 
 func containerRow(r swarm.Report, stack string, c swarm.Container) row {
-	t := containerTone(c)
+	t := toneOf(c.Condition())
 	line := row{key: c.Name, owner: stack, cells: []cell{
 		dot(t, c.Name), {text: stack}, {text: c.State, tone: t, rank: float64(t)}, ageCell(r, c.Since), {text: c.Status},
 	}}
@@ -354,18 +339,6 @@ func containerRow(r swarm.Report, stack string, c swarm.Container) row {
 	}
 
 	return line
-}
-
-// containerTone rates c: restarting is a crash loop, so bad; starting is fine for now.
-func containerTone(c swarm.Container) tone {
-	switch {
-	case !c.OK():
-		return bad
-	case strings.Contains(c.Status, "health: starting"), c.State == "created", c.State == "paused":
-		return warn
-	}
-
-	return good
 }
 
 // --- formats ----------------------------------------------------------------
@@ -396,16 +369,48 @@ func ageCell(r swarm.Report, t time.Time) cell {
 	return cell{text: short(d), rank: d.Seconds()}
 }
 
-// machineState is a machine's state: down, degraded if it has problems, or else ok.
-func machineState(r swarm.Report) (tone, string) {
-	switch {
-	case r.Err != nil:
-		return bad, "down"
-	case len(r.Problems()) > 0:
-		return warn, "degraded"
+// count is how many of something are fine, of how many.
+type count struct {
+	OK    int `json:"ok"`
+	Total int `json:"total"`
+}
+
+// counts says how many of r's units, those the services tab lists, and of its
+// stacks are fine; no stacks without docker. The machines table and status's JSON
+// show them.
+func counts(r swarm.Report) (units count, stacks *count) {
+	watched := r.Watched()
+	units = count{OK: watched - len(r.Failed()), Total: watched}
+
+	if r.Docker != "" {
+		stacks = &count{OK: r.StacksUp(), Total: len(r.Stacks)}
 	}
 
-	return good, "ok"
+	return units, stacks
+}
+
+// countCell shows c as "fine/all": bad unless all are, sorting on those that aren't.
+func countCell(c count) cell {
+	cl := cell{text: fmt.Sprintf("%d/%d", c.OK, c.Total), rank: float64(c.Total - c.OK)}
+	if c.OK < c.Total {
+		cl.tone = bad
+	}
+
+	return cl
+}
+
+// machineState is a machine's condition, and how the STATE column words it.
+func machineState(r swarm.Report) (tone, string) {
+	c := r.Condition()
+
+	switch c {
+	case swarm.Broken:
+		return toneOf(c), "down"
+	case swarm.Warning:
+		return toneOf(c), "degraded"
+	}
+
+	return toneOf(c), "ok"
 }
 
 // stateCell is a machine's state: it sorts on its tone, worst first.
@@ -418,10 +423,12 @@ func stateCell(t tone, text string) cell {
 
 // usageCell shows a percentage, in the describe card's colors (usageTone) but only
 // once it needs attention, as the table's other fields; "-" if unknown.
-func usageCell(percent float64) cell {
-	if percent < 0 {
+func usageCell(p *float64) cell {
+	if p == nil {
 		return cell{text: "-", rank: -1}
 	}
+
+	percent := *p
 
 	c := cell{text: fmt.Sprintf("%.0f%%", percent), rank: percent}
 	if t := usageTone(percent / 100); t != good {

@@ -67,12 +67,6 @@ type machineJSON struct {
 	Problems      []string   `json:"problems"`
 }
 
-// count is how many of something are fine, of how many.
-type count struct {
-	OK    int `json:"ok"`
-	Total int `json:"total"`
-}
-
 // PrintStatusJSON writes the machines as a JSON array of machineJSON. Like
 // PrintStatus, it returns false if any machine is unreachable or has a problem.
 func PrintStatusJSON(w io.Writer, reports []swarm.Report) (bool, error) {
@@ -105,24 +99,10 @@ func statusOf(r swarm.Report) machineJSON {
 		m.Deployed = new(r.Deployed.UTC())
 	}
 
-	watched, failed := r.Watched(), len(r.Failed())
+	units, stacks := counts(r)
+	m.Units, m.Stacks = &units, stacks
 	m.Uptime, m.RebootPending = new(int64(r.Uptime.Seconds())), new(r.RebootPending)
-	m.Units = &count{OK: watched - failed, Total: watched}
-
-	if r.Docker != "" {
-		m.Stacks = &count{OK: r.StacksUp(), Total: len(r.Stacks)}
-	}
-
-	m.Load, m.Memory, m.Disk = known(r.Load), known(r.Memory), known(r.Disk)
+	m.Load, m.Memory, m.Disk = r.Load, r.Memory, r.Disk
 
 	return m
-}
-
-// known is a percentage the probe measured, or nil if it couldn't (-1).
-func known(percent float64) *float64 {
-	if percent < 0 {
-		return nil
-	}
-
-	return &percent
 }
