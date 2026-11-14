@@ -41,7 +41,7 @@ func TestParse(t *testing.T) {
 		t.Errorf("deployed %v, uptime %v", r.Deployed, r.Uptime)
 	}
 
-	if r.Load != 12.5 || r.Memory != 74.2 || r.Disk != 93.1 {
+	if r.Load == nil || r.Memory == nil || r.Disk == nil || *r.Load != 12.5 || *r.Memory != 74.2 || *r.Disk != 93.1 {
 		t.Errorf("load %v, memory %v, disk %v", r.Load, r.Memory, r.Disk)
 	}
 
@@ -97,6 +97,30 @@ func TestUnloadedUnits(t *testing.T) {
 	}
 }
 
+// The probe asks docker inspect for its containers' states as describe does, and
+// as parseStates reads them.
+func TestStateFormat(t *testing.T) {
+	if !strings.Contains(probeScript, "inspect --format '"+stateFormat+"'") {
+		t.Errorf("probe.sh's docker inspect format isn't stateFormat: %s", stateFormat)
+	}
+}
+
+// Lines that don't read are a problem, not a silent gap: a format changed. Blank
+// lines aren't.
+func TestMisread(t *testing.T) {
+	r, err := Parse("### meta\nnow=1\n### units\nId=web.service\n\nnot a unit\n\n" +
+		"### containers\nweb\tweb-1\trunning\tUp\nweb web-2 running\n\n" +
+		"### states\n/web-1 0001-01-01T00:00:00Z 0001-01-01T00:00:00Z 0 -\n/web-2 yesterday\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"containers: 1 unreadable lines", "states: 1 unreadable lines", "units: 1 unreadable lines"}
+	if !slices.Equal(r.Errors, want) || len(r.Units) != 1 || len(r.Stacks) != 1 {
+		t.Errorf("errors %q, want %q; units %v, stacks %v", r.Errors, want, r.Units, r.Stacks)
+	}
+}
+
 // Elsewhere than NixOS, there is no deploy time or revision, and nothing's wrong.
 func TestParseNotNixOS(t *testing.T) {
 	raw, err := os.ReadFile("testdata/debian.probe")
@@ -133,7 +157,7 @@ func TestProbeErrors(t *testing.T) {
 		t.Error("docker that fails must still count as present")
 	}
 
-	if r.Load != -1 || r.Memory != -1 || r.Disk != -1 {
+	if r.Load != nil || r.Memory != nil || r.Disk != nil {
 		t.Errorf("usage not measured must be unknown, not 0%%: load %v, memory %v, disk %v", r.Load, r.Memory, r.Disk)
 	}
 
