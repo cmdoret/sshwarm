@@ -52,5 +52,5 @@ format *args:
 [private]
 check-format *args:
   @just format --fail-on-change --no-cache "$@" || \
-    { "{{nu_log}}" err "Unformatted files: run 'just format' locally."; exit 0; }
+    { "{{nu_log}}" err "Unformatted files: run 'just format' locally."; exit 1; }
 

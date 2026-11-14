@@ -1,8 +1,9 @@
 # Plain treefmt config: `just format`. The Nix dev shells ship the formatters.
 
-[formatter.gofmt]
-command = "gofmt"
-options = ["-w"]
+# gofumpt and goimports, as .golangci.yml sets them up.
+[formatter.golangci-lint]
+command = "golangci-lint"
+options = ["fmt"]
 includes = ["*.go"]
 
 [formatter.nixfmt]
