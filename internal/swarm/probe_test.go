@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cmdoret/sshwarm/internal/inventory"
 	"github.com/cmdoret/sshwarm/internal/testutil"
 )
 
@@ -25,7 +26,7 @@ func fixture(t *testing.T) Report {
 		t.Fatal(err)
 	}
 
-	r.Host = Host{Name: "app-node-argiope", Address: "argiope"}
+	r.Host = inventory.Host{Name: "app-node-argiope", Address: "argiope"}
 
 	return r
 }
@@ -174,56 +175,9 @@ func TestDockerCmd(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if r.Docker != tt.want {
+		if string(r.Docker) != tt.want {
 			t.Errorf("docker answering %s: got %q, want %q", tt.answers, r.Docker, tt.want)
 		}
-	}
-}
-
-// A unit's action runs systemctl directly as root, else through sudo, and only once
-// when it fails.
-func TestUnitAction(t *testing.T) {
-	testutil.FakeBin(t, "id", `echo "$FAKE_UID"`)
-	testutil.FakeBin(t, "sudo", `shift; printf 'sudo '; exec "$@"`) // sudo -n …
-	testutil.FakeBin(t, "systemctl", `echo "systemctl $*"; exit 1`)
-
-	for uid, want := range map[string]string{"0": "systemctl --no-block restart it's", "1000": "sudo systemctl --no-block restart it's"} {
-		t.Setenv("FAKE_UID", uid)
-
-		out, err := exec.CommandContext(t.Context(), "bash", "-c", UnitAction("restart", "it's")).CombinedOutput()
-		if err == nil || strings.TrimSpace(string(out)) != want {
-			t.Errorf("uid %s: %v, ran %q, want %q once", uid, err, out, want)
-		}
-	}
-}
-
-// A reboot is a timer's, a moment later, running systemctl by its full path.
-func TestReboot(t *testing.T) {
-	testutil.FakeBin(t, "id", "echo 0")
-	testutil.FakeBin(t, "systemctl", "")
-	testutil.FakeBin(t, "systemd-run", `echo "$@"`)
-
-	out, err := exec.CommandContext(t.Context(), "bash", "-c", Reboot()).CombinedOutput()
-	if f := strings.Fields(string(out)); err != nil || len(f) != 4 || f[0] != "--on-active=2" || !strings.HasPrefix(f[2], "/") || f[3] != "reboot" {
-		t.Errorf("%v, ran systemd-run %s", err, out)
-	}
-}
-
-func TestSSHCmd(t *testing.T) {
-	args := sshCmd(t.Context(), Host{Address: "-oProxyCommand=x", Opts: []string{"-p", "2222"}}, true, "uptime").Args
-	n := len(args)
-
-	if !slices.Equal(args[n-3:], []string{"--", "-oProxyCommand=x", "uptime"}) {
-		t.Errorf("want -- destination command at the end: %q", args)
-	}
-
-	if i := slices.Index(args, "-p"); i < 0 || args[i+1] != "2222" || !slices.Contains(args[:n-3], "-tt") {
-		t.Errorf("host options and the terminal go before --: %q", args)
-	}
-
-	// No remote command: a login shell.
-	if args := sshCmd(t.Context(), Host{Address: "h"}, true, "").Args; args[len(args)-1] != "h" {
-		t.Errorf("want the destination last: %q", args)
 	}
 }
 
@@ -244,7 +198,7 @@ cat testdata/argiope.probe
 `)
 
 	start := time.Now()
-	hosts := []Host{{Address: "ok"}, {Address: "down"}, {Address: "slow"}, {Address: "half"}}
+	hosts := []inventory.Host{{Address: "ok"}, {Address: "down"}, {Address: "slow"}, {Address: "half"}}
 	r := ProbeAll(t.Context(), hosts, time.Second)
 
 	if took := time.Since(start); took > 4*time.Second {
@@ -267,19 +221,5 @@ cat testdata/argiope.probe
 	want := []string{"containers: no docker", "probe: timed out on the host"}
 	if r[3].Err != nil || !r[3].RebootPending || !slices.Equal(r[3].Errors, want) {
 		t.Errorf("half host: %v %q", r[3].Err, r[3].Errors)
-	}
-}
-
-func TestCleanLogLines(t *testing.T) {
-	testutil.FakeBin(t, "ssh", `printf 'user \033]52;c;aGk=\007logged in\r\n\tindented\n\033[32m[Nest]\033[39m LOG\n'`)
-
-	var got []string
-	for line := range streamLines(t.Context(), Host{Address: "h"}, false, "cmd") {
-		got = append(got, line)
-	}
-
-	// No escape sequence, colors included, and no stray carriage return.
-	if want := []string{"user logged in", "\tindented", "[Nest] LOG"}; !slices.Equal(got, want) {
-		t.Errorf("got %q, want %q", got, want)
 	}
 }

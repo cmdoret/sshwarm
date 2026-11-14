@@ -16,6 +16,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cmdoret/sshwarm/internal/inventory"
+	"github.com/cmdoret/sshwarm/internal/remote"
 )
 
 //go:embed probe.sh
@@ -23,7 +26,7 @@ var probeScript string
 
 // ProbeAll probes the hosts in parallel, each within timeout. The reports keep the
 // hosts' order.
-func ProbeAll(ctx context.Context, hosts []Host, timeout time.Duration) []Report {
+func ProbeAll(ctx context.Context, hosts []inventory.Host, timeout time.Duration) []Report {
 	reports := make([]Report, len(hosts))
 
 	var wg sync.WaitGroup
@@ -46,21 +49,21 @@ func ProbeAll(ctx context.Context, hosts []Host, timeout time.Duration) []Report
 
 // RunProbe returns the probe's raw output, without control characters. It gives
 // up after timeout.
-func RunProbe(ctx context.Context, h Host, timeout time.Duration) (string, error) {
+func RunProbe(ctx context.Context, h inventory.Host, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// The probe stops on its own on the host, a bit before we give up: without a
 	// terminal, killing ssh wouldn't stop a command stuck there.
 	onHost := max(int(timeout.Seconds())-2, 1)
-	cmd := sshCmd(ctx, h, false, fmt.Sprintf("timeout %d bash -s", onHost))
+	cmd := remote.Command(ctx, h, false, fmt.Sprintf("timeout %d bash -s", onHost))
 	cmd.Stdin = strings.NewReader(probeScript)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	raw, err := cmd.Output()
-	out := clean(string(raw))
+	out := remote.Clean(string(raw))
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return "", errors.New("timed out")
@@ -111,7 +114,7 @@ func Parse(out string) (Report, error) {
 		Load:          usage(kv["load"]),
 		Memory:        usage(kv["memory"]),
 		Disk:          usage(kv["disk"]),
-		Docker:        kv["docker"],
+		Docker:        Docker(kv["docker"]),
 		Units:         withUnloaded(parseUnits(sec["units"]), sec["unit-files"]),
 		Stacks:        parseStacks(sec["containers"], parseTimes(sec["times"])),
 	}

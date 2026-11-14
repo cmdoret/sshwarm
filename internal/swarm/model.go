@@ -5,22 +5,19 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/cmdoret/sshwarm/internal/inventory"
+	"github.com/cmdoret/sshwarm/internal/remote"
 )
 
-// Host is a machine sshwarm watches: its name, and how to reach it over ssh.
-type Host struct {
-	Name    string   // as the flake or hosts file names it, e.g. web-1
-	Address string   // ssh destination, user@hostname
-	Opts    []string // extra ssh options
-}
+// Docker is the command that reaches docker on a host, as the probe found it, e.g.
+// "sudo -n docker".
+type Docker string
 
 // Report is what one probe found on one host. Err is set when the probe failed;
 // Errors lists the probe's commands that failed while the rest worked.
 type Report struct {
-	Host          Host
+	Host          inventory.Host
 	Err           error
 	Errors        []string
 	OS            string    // e.g. Debian GNU/Linux 12 (bookworm)
@@ -33,7 +30,7 @@ type Report struct {
 	Disk          float64 // percent used of the fullest local disk, -1 if unknown
 	Revision      string  // NixOS: the git commit the system was built from, if set
 	Units         []Unit
-	Docker        string // the command that reaches docker there, e.g. "sudo -n docker"; "" without docker
+	Docker        Docker // "" without docker
 	Stacks        []Stack
 }
 
@@ -178,17 +175,5 @@ func (r Report) Problems() []string {
 // Age is the time since t, on the host's clock.
 func (r Report) Age(t time.Time) time.Duration { return r.Now.Sub(t) }
 
-// clean makes remote text plain: it drops escape sequences, then any other
-// control character but tabs and newlines.
-func clean(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r == '\t' || r == '\n' || !unicode.IsControl(r) {
-			return r
-		}
-
-		return -1
-	}, ansi.Strip(s))
-}
-
 // oneLine flattens remote text for an error message or a table cell.
-func oneLine(s string) string { return clean(strings.Join(strings.Fields(s), " ")) }
+func oneLine(s string) string { return remote.Clean(strings.Join(strings.Fields(s), " ")) }
