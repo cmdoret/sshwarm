@@ -12,3 +12,10 @@ repos:
         entry: just lint
         language: system
         pass_filenames: false
+      # When Go's dependencies change: the commit then fails with the new hash, to stage.
+      - id: vendor-hash
+        name: Update vendor hash.
+        entry: just nix::update-vendor-hash
+        language: system
+        files: ^go\.(mod|sum)$
+        pass_filenames: false

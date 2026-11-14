@@ -38,6 +38,10 @@ lint: go::lint nix::lint
 [group("tooling")]
 build: go::build nix::build
 
+# Update all lock files and the vendor hash.
+[group("tooling")]
+update: go::update nix::update
+
 # Format repo
 [group("tooling")]
 format *args:
