@@ -86,7 +86,7 @@ func PrintStatusJSON(w io.Writer, reports []swarm.Report) (bool, error) {
 	return ok, enc.Encode(machines)
 }
 
-// statusOf is r as machineJSON.
+// statusOf turns r into what the JSON says of its machine.
 func statusOf(r swarm.Report) machineJSON {
 	_, state := machineState(r)
 	m := machineJSON{Name: r.Host.Name, State: state, Problems: append([]string{}, r.Problems()...)} // [] without any

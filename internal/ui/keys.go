@@ -52,7 +52,7 @@ var (
 	keySort      = bind("O", "sort", "O")
 	keyTopBottom = bind("g/G", "top/bottom", "home", "g", "end", "G")
 
-	// The text screen's.
+	// The output screen's.
 	keyFollow = bind("s", "follow", "s")
 	keyRaw    = bind("v", "raw", "v")
 	keyWrap   = bind("w", "wrap", "w")

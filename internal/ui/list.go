@@ -148,7 +148,7 @@ func (l *list) show(m *model, p *pick, command func(swarm.Report, string) (strin
 
 	title, cmd := command(p.r, p.key)
 
-	return m.push(newText(title, p.r.Host, cmd, card))
+	return m.push(newOutput(title, p.r.Host, cmd, card))
 }
 
 // help is the list's keys, for the help line: its kind's, then the grid's.

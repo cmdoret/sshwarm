@@ -113,12 +113,12 @@ func streamOf(batch tea.BatchMsg) tea.Msg {
 	return nil
 }
 
-// ran checks that the text screen on top runs a command with each of want. Unlike
+// ran checks that the output screen on top runs a command with each of want. Unlike
 // the screen, the command doesn't wrap with the window.
 func (s *session) ran(want ...string) {
 	s.t.Helper()
 
-	cmd := s.text().cmd
+	cmd := s.output().cmd
 	for _, w := range want {
 		if !strings.Contains(cmd, w) {
 			s.t.Errorf("missing %q in the command: %s", w, cmd)
@@ -146,8 +146,8 @@ func (s *session) list() *list {
 	return nil
 }
 
-// text is the text screen on top: logs or a description.
-func (s *session) text() *text { return s.model().top().(*text) }
+// output is the output screen on top: logs or a description.
+func (s *session) output() *output { return s.model().top().(*output) }
 
 // rows lists the keys of the top table's rows, in order.
 func (s *session) rows() []string {
@@ -257,7 +257,7 @@ echo line-two
 	s.expect("with a terminal", "-n 300 -o short-iso --no-pager -f", "s stop following")
 
 	// A long line wraps instead of being cut off.
-	stream := s.text().ch
+	stream := s.output().ch
 	s.m, _ = s.m.Update(logLinesMsg{ch: stream, lines: []string{strings.Repeat("x", 150) + " ENDOFLONGLINE"}})
 	s.expect("ENDOFLONGLINE")
 
@@ -357,7 +357,7 @@ func TestNavigation(t *testing.T) {
 
 	// :svc from the logs closes them, their stream with them, and starts over from
 	// the machines, so esc goes back there.
-	logs := s.text()
+	logs := s.output()
 	s.keys(":", "svc", "enter")
 	s.expect("services 3")
 
@@ -602,7 +602,7 @@ func TestActions(t *testing.T) {
 
 	s.keys("s")
 
-	if s.text().follow {
+	if s.output().follow {
 		t.Error("s followed a description")
 	}
 
@@ -681,7 +681,7 @@ func TestCard(t *testing.T) {
 	}
 
 	// In a while, it describes again by itself, the last card showing meanwhile.
-	card := s.text()
+	card := s.output()
 	s.m, cmd = s.m.Update(redescribeMsg{card, card.runs})
 	s.expect("running · health unhealthy", s.model().spin.View()+" refreshing")
 
@@ -726,7 +726,7 @@ func TestCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := newText("describe", inventory.Host{}, "", containerCard)
+	c := newOutput("describe", inventory.Host{}, "", containerCard)
 	c.resize(80, 30)
 	c.lines = strings.Split(string(raw), "\n")
 	c.setContent()

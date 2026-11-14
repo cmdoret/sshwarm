@@ -14,7 +14,7 @@ import (
 // A card is a human-readable description with values rendered into fields,
 // tables, and bars for what's used. Each kind's card parses its describe
 // command's output with swarm, and draws it whole: lines wider than the window
-// scroll left and right. On an error, the text screen shows the output as it came
+// scroll left and right. On an error, the output screen shows the output as it came
 // instead.
 
 const (
@@ -99,16 +99,26 @@ func barCell(f float64, text string) cell {
 }
 
 // usageTone rates how much of something is used: fine below 70%, a warning below
-// 90%, then bad. From 90%, a disk is also one of a machine's problems (swarm.FullDisk).
+// swarm.FullDisk, 90%, from which a disk is also one of a machine's problems; then bad.
 func usageTone(f float64) tone {
 	switch {
-	case f >= 0.9:
+	case f*100 >= swarm.FullDisk:
 		return bad
 	case f >= 0.7:
 		return warn
 	}
 
 	return good
+}
+
+// ago says how long ago t was on the host, whose clock read now; on this
+// machine's clock if now is unknown.
+func ago(now, t time.Time) string {
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	return short(now.Sub(t)) + " ago"
 }
 
 // fraction is part of whole, 0 for nothing of nothing.
@@ -217,7 +227,7 @@ func unitCard(out string) (string, error) {
 
 	since := ""
 	if !u.Since.IsZero() {
-		since = "since " + short(time.Since(u.Since)) + " ago"
+		since = "since " + ago(u.Now, u.Since)
 	}
 
 	result := u.Result
@@ -327,7 +337,7 @@ func containerCard(out string) (string, error) {
 
 	started := ""
 	if !ci.StartedAt.IsZero() {
-		started = ci.StartedAt.Local().Format("2006-01-02 15:04") + " · " + short(time.Since(ci.StartedAt)) + " ago"
+		started = ci.StartedAt.Local().Format("2006-01-02 15:04") + " · " + ago(ci.Now, ci.StartedAt)
 	}
 
 	stack := ""
