@@ -21,11 +21,8 @@ buildGoModule {
     "-X main.version=${version}"
     "-X main.commit=${rev}"
   ];
-  # Used by the image's labels: the commit, and its date (20261114093000).
-  passthru = {
-    inherit rev;
-    date = src.lastModifiedDate or "19700101000001";
-  };
+  # Used by the image's labels.
+  passthru = { inherit rev; };
   meta = {
     description = "k9s for ssh: your Linux machines, their services, containers and logs, in one terminal";
     homepage = "https://github.com/cmdoret/sshwarm";
