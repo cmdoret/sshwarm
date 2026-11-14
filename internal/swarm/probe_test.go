@@ -51,6 +51,10 @@ func TestParse(t *testing.T) {
 		t.Errorf("deployed %v, uptime %v", r.Deployed, r.Uptime)
 	}
 
+	if r.CPU != 12.5 || r.Memory != 74.2 || r.Disk != 93.1 {
+		t.Errorf("cpu %v, memory %v, disk %v", r.CPU, r.Memory, r.Disk)
+	}
+
 	if r.Revision != "0123456789abcdef0123456789abcdef01234567-dirty" {
 		t.Errorf("rev = %s", r.Revision)
 	}
@@ -107,6 +111,10 @@ func TestProbeErrors(t *testing.T) {
 
 	if r.Docker == "" {
 		t.Error("docker that fails must still count as present")
+	}
+
+	if r.CPU != -1 || r.Memory != -1 || r.Disk != -1 {
+		t.Errorf("usage not measured must be unknown, not 0%%: cpu %v, memory %v, disk %v", r.CPU, r.Memory, r.Disk)
 	}
 
 	want := []string{"containers: Cannot connect to the Docker daemon", "units: Failed to connect to bus"}

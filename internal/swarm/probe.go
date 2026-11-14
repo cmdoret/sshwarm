@@ -111,6 +111,9 @@ func Parse(out string) (Report, error) {
 		Now:           unix(kv["now"]),
 		Deployed:      unix(kv["deployed"]),
 		RebootPending: kv["reboot"] == "true",
+		CPU:           usage(kv["cpu"]),
+		Memory:        usage(kv["memory"]),
+		Disk:          usage(kv["disk"]),
 		Docker:        kv["docker"],
 		Units:         parseUnits(sec["units"]),
 		Stacks:        parseStacks(sec["containers"]),
@@ -193,6 +196,17 @@ func keyValues(s string) map[string]string {
 	}
 
 	return kv
+}
+
+// usage reads a percentage the probe computed; -1 when it couldn't, as 0% would
+// pass for a fine machine.
+func usage(s string) float64 {
+	n, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return -1
+	}
+
+	return n
 }
 
 // unix reads seconds since the epoch; zero or anything else is the zero time.

@@ -27,7 +27,10 @@ type Report struct {
 	Uptime        time.Duration
 	Deployed      time.Time // NixOS: the last deploy; zero elsewhere
 	RebootPending bool
-	Revision      string // NixOS: the git commit the system was built from, if set
+	CPU           float64 // percent, -1 if unknown: the 1-minute load per CPU, past 100 when tasks wait
+	Memory        float64 // percent not available, -1 if unknown
+	Disk          float64 // percent used of the fullest local disk, -1 if unknown
+	Revision      string  // NixOS: the git commit the system was built from, if set
 	Units         []Unit
 	Docker        string // the command that reaches docker there, e.g. "sudo -n docker"; "" without docker
 	Stacks        []Stack

@@ -57,6 +57,13 @@ if rev=$(nixos-version --configuration-revision 2>/dev/null); then # NixOS, when
   echo "revision=$rev"
 fi
 echo "reboot=$(reboot_pending && echo true || echo false)"
+# Usage in percent (1-minute load per CPU (past 100 when tasks wait).
+echo "cpu=$(awk -v cpus="$(nproc)" '{ print 100 * $1 / cpus }' /proc/loadavg)"
+# Memory not available
+echo "memory=$(awk '/^MemTotal:/ { total = $2 } /^MemAvailable:/ { free = $2 } END { print 100 * (total - free) / total }' /proc/meminfo)"
+# Local devices only to avoid hanging from network mounts
+echo "disk=$(df -P -l -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null |
+  awk 'NR > 1 && $3 + $4 > 0 { used = 100 * $3 / ($3 + $4); if (used > disk) disk = used } END { print disk }')"
 docker=$(docker_cmd)
 echo "docker=$docker"
 
