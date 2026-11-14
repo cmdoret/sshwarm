@@ -19,7 +19,7 @@ func TestTones(t *testing.T) {
 	if m.tone != inherit {
 		t.Errorf("degraded machine row tone = %v", m.tone)
 	}
-	for i, want := range map[int]tone{1: warn, 2: inherit, 3: inherit, 4: warn, 5: bad, 6: bad, 7: bad} {
+	for i, want := range map[int]tone{1: warn, 2: inherit, 3: inherit, 4: warn, 5: bad, 6: bad, 7: inherit, 8: warn, 9: bad, 10: bad} {
 		if m.cells[i].tone != want {
 			t.Errorf("machine cell %d %q: tone %v, want %v", i, m.cells[i].text, m.cells[i].tone, want)
 		}
@@ -85,5 +85,47 @@ func TestGridRender(t *testing.T) {
 		if w := lipgloss.Width(l); w != want {
 			t.Errorf("line %d is %d wide, header %d: %q", i, w, want, l)
 		}
+	}
+}
+
+// A narrow grid scrolls its columns under the first, every line as wide as the grid,
+// with "…" where more follows; a wide one doesn't.
+func TestGridScroll(t *testing.T) {
+	r := fixture(t)
+	g := grid{titles: machineTitles}
+	g.width, g.height = 60, 2 // the header and the row
+	g.setRows([]row{machineRow(r)})
+
+	right := tea.KeyMsg{Type: tea.KeyRight}
+	for range 20 { // past the end, which stops it
+		lines := strings.Split(g.view(), "\n")
+		for i, l := range lines {
+			if w := lipgloss.Width(l); w != g.width || !strings.Contains(l, []string{"MACHINE", "app-node-argiope"}[i]) {
+				t.Fatalf("scrolled %d, line %d is %d wide or lost its first column: %q", g.left, i, w, l)
+			}
+		}
+
+		if more := strings.HasSuffix(strings.TrimSpace(lines[1]), "…"); more != (g.left < g.overflow()) {
+			t.Fatalf("scrolled %d of %d: %q", g.left, g.overflow(), lines[1])
+		}
+
+		g.key(right)
+	}
+
+	if !strings.Contains(g.view(), "(Up 2 hours (unhealthy))") {
+		t.Errorf("the end of the problems isn't shown at the end:\n%s", g.view())
+	}
+
+	for range 20 {
+		g.key(tea.KeyMsg{Type: tea.KeyLeft})
+	}
+
+	if g.left != 0 {
+		t.Errorf("scrolled back to %d", g.left)
+	}
+
+	g.width = 1000
+	if g.clamp(); g.overflow() != 0 || g.left != 0 {
+		t.Errorf("a wide grid scrolls: overflow %d, left %d", g.overflow(), g.left)
 	}
 }

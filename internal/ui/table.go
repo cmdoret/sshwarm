@@ -171,10 +171,15 @@ func (t *table) view(m *model) string {
 		filter = " " + t.filter.View()
 	}
 
+	help := t.kind.help
+	if t.grid.overflow() > 0 {
+		help += " · ←→ scroll"
+	}
+
 	if t.kind == machines {
 		title := crumbs(fmt.Sprintf("machines %d", len(m.reports))) + filter
 
-		return m.frame(title, m.refreshStatus(), t.grid.view(), t.kind.help+" · / filter · : go to · r refresh · q quit")
+		return m.frame(title, m.refreshStatus(), t.grid.view(), help+" · / filter · : go to · r refresh · q quit")
 	}
 
 	r := m.reports[t.host]
@@ -206,7 +211,6 @@ func (t *table) view(m *model) string {
 		}
 	}
 
-	help := t.kind.help
 	if t.kind == services {
 		scope := "all"
 		if m.all {
