@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
+
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
+	"github.com/cmdoret/sshwarm/internal/inventory"
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
@@ -39,7 +42,7 @@ type logLinesMsg struct {
 // follow, or a description, drawn as a card once all of it is in.
 type text struct {
 	title  string // after the machine's name: a unit, "stack db", "describe web-1"...
-	host   swarm.Host
+	host   inventory.Host
 	cmd    string // as swarm.Stream runs it
 	lines  []string
 	ch     <-chan string // the current stream, nil if none
@@ -54,7 +57,7 @@ type text struct {
 	shown              string // what the pager shows, unwrapped; "" while loading: what c copies
 }
 
-func newText(title string, h swarm.Host, cmd string, card cardFunc) *text {
+func newText(title string, h inventory.Host, cmd string, card cardFunc) *text {
 	t := &text{title: title, host: h, cmd: cmd, card: card, wrap: true, pager: viewport.New(0, 0)}
 	t.pager.SetHorizontalStep(8) // left and right, over a card or unwrapped lines
 
@@ -150,46 +153,72 @@ func (t *text) setContent() {
 
 // resize gives the pager the window, but for the frame unless fullscreen.
 func (t *text) resize(width, height int) {
-	if !t.full {
-		width, height = width-sides, height-chrome
-	}
-
-	t.pager.Width, t.pager.Height = max(width, 1), max(height, 1)
+	w, h := bodySize(width, height, t.full)
+	t.pager.Width, t.pager.Height = max(w, 1), max(h, 1)
 	t.setContent()
 }
+
+// update takes a key, the next lines of the stream on screen, or a request to
+// describe again, unless it's for a run since replaced.
+func (t *text) update(m *model, msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		return t.key(m, msg)
+	case logLinesMsg:
+		if msg.ch != t.ch {
+			return nil // a stream since stopped
+		}
+
+		if cmd := t.add(msg); !msg.done || t.card == nil {
+			return cmd
+		}
+
+		return t.again(m.probes.interval) // a description refreshes as tables do
+	case redescribeMsg:
+		if msg.t == t && msg.run == t.runs {
+			return t.start(m.ctx, false)
+		}
+	}
+
+	return nil
+}
+
+func (t *text) close()       { t.stop() }
+func (t *text) busy() bool   { return t.card != nil && t.ch != nil } // describing
+func (t *text) typing() bool { return false }
 
 func (t *text) key(m *model, k tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 
-	switch k.String() {
-	case "esc":
+	switch {
+	case key.Matches(k, keyBack):
 		m.pop()
-	case "r": // runs the command again: a description's latest state, or the latest logs
+	case key.Matches(k, keyRefresh): // runs the command again: a description's latest state, or the latest logs
 		return t.start(m.ctx, t.follow)
-	case "s":
+	case key.Matches(k, keyFollow):
 		if t.card == nil {
 			return t.start(m.ctx, !t.follow)
 		}
-	case "v":
+	case key.Matches(k, keyRaw):
 		if t.card != nil {
 			t.raw = !t.raw
 			t.setContent()
 			t.pager.GotoTop()
 		}
-	case "w":
+	case key.Matches(k, keyWrap):
 		if !t.showsCard() { // a card is drawn whole: nothing in it to wrap
 			t.wrap = !t.wrap
 			t.setContent()
 			t.pager.SetXOffset(0) // wrapped, no line is wider than the window: show them whole
 		}
-	case "f":
+	case key.Matches(k, keyFull):
 		t.full = !t.full
 		t.resize(m.width, m.height)
-	case "c":
+	case key.Matches(k, keyCopy):
 		m.flash = t.copyShown()
-	case "g", "home":
+	case key.Matches(k, keyTop):
 		t.pager.GotoTop()
-	case "G", "end":
+	case key.Matches(k, keyBottom):
 		t.pager.GotoBottom()
 	default:
 		t.pager, cmd = t.pager.Update(k)
@@ -198,14 +227,9 @@ func (t *text) key(m *model, k tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
-func (t *text) view(m *model) string {
-	if t.full { // the command bar or a message still shows, on the last line
-		lines := strings.Split(t.pager.View(), "\n")
-		if bar := m.bar(); bar != "" {
-			lines[len(lines)-1] = bar
-		}
-
-		return strings.Join(lines, "\n")
+func (t *text) view(m *model) frame {
+	if t.full {
+		return frame{body: t.pager.View(), full: true}
 	}
 
 	title := crumbs(t.host.Name, t.title)
@@ -220,23 +244,26 @@ func (t *text) view(m *model) string {
 		status = when + dimStyle.Render(" · ") + status
 	}
 
-	help := "f fullscreen · c copy · g/G top/bottom · r refresh · esc back · q quit"
-	if !t.showsCard() {
-		help = "w wrap · " + help
-	}
+	var help []key.Binding
 
 	switch {
 	case t.follow:
-		help = "s stop following · " + help
+		help = append(help, as(keyFollow, "stop following"))
 	case t.card == nil:
-		help = "s follow · " + help
+		help = append(help, keyFollow)
 	case t.raw:
-		help = "v card · " + help
+		help = append(help, as(keyRaw, "card"))
 	default:
-		help = "v raw · " + help
+		help = append(help, keyRaw)
 	}
 
-	return m.frame(title, status, t.pager.View(), help)
+	if !t.showsCard() {
+		help = append(help, keyWrap)
+	}
+
+	help = append(help, keyFull, keyCopy, keyTopBottom, keyRefresh, keyBack, keyQuit)
+
+	return frame{title: title, status: status, body: t.pager.View(), help: help}
 }
 
 // redescribeMsg asks a description's screen to run again, unless it's closed or ran

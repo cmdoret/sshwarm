@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cmdoret/sshwarm/internal/inventory"
 	"github.com/cmdoret/sshwarm/internal/swarm"
 	"github.com/cmdoret/sshwarm/internal/ui"
 )
@@ -153,7 +154,7 @@ func statusCmd(ctx context.Context, opts options, args []string, stdout io.Write
 		return err
 	}
 
-	hosts = swarm.Select(hosts, fs.Args())
+	hosts = inventory.Select(hosts, fs.Args())
 	if len(hosts) == 0 {
 		return fmt.Errorf("no machine matches %v", fs.Args())
 	}
@@ -202,7 +203,7 @@ func probeCmd(ctx context.Context, opts options, args []string, stdout io.Writer
 		return err
 	}
 
-	i, err := swarm.Find(hosts, fs.Arg(0))
+	i, err := inventory.Find(hosts, fs.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -239,12 +240,12 @@ func newFlagSet(name string) *flag.FlagSet {
 }
 
 // loadHosts loads the machines, from the hosts file or else the flake.
-func loadHosts(ctx context.Context, opts options) ([]swarm.Host, error) {
+func loadHosts(ctx context.Context, opts options) ([]inventory.Host, error) {
 	switch {
 	case opts.hosts != "":
-		return swarm.LoadFile(opts.hosts)
+		return inventory.LoadFile(opts.hosts)
 	case opts.flake != "":
-		return swarm.LoadFlake(ctx, opts.flake)
+		return inventory.LoadFlake(ctx, opts.flake)
 	}
 
 	return nil, errors.New("no hosts provided: use --hosts <file> or --flake <dir>, or set SSHWARM_HOSTS or SSHWARM_FLAKE")

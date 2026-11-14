@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -80,14 +82,19 @@ type grid struct {
 // setRows shows rows, sorted as the grid is, with the cursor on the row it was on if
 // that's still there: a refresh or a sort moves rows around.
 func (g *grid) setRows(rows []row) {
-	key := ""
-	if g.cursor < len(g.rows) {
-		key = g.rows[g.cursor].key
-	}
-
+	key, _ := g.selected()
 	g.rows = rows
 	g.sort()
 	g.choose(key)
+}
+
+// selected is the key of the row under the cursor, if there's one.
+func (g grid) selected() (string, bool) {
+	if g.cursor < 0 || g.cursor >= len(g.rows) {
+		return "", false
+	}
+
+	return g.rows[g.cursor].key, true
 }
 
 // choose puts the cursor on the row about key, if there's one.
@@ -186,34 +193,34 @@ func span(ws []int) int {
 func (g *grid) key(k tea.KeyMsg) {
 	page := g.visible()
 
-	switch k.String() {
-	case "up", "k":
+	switch {
+	case key.Matches(k, keyUp):
 		g.cursor--
-	case "down", "j":
+	case key.Matches(k, keyDown):
 		g.cursor++
-	case "pgup":
+	case key.Matches(k, keyPageUp):
 		g.cursor -= page
-	case "pgdown":
+	case key.Matches(k, keyPageDown):
 		g.cursor += page
-	case "ctrl+u":
+	case key.Matches(k, keyHalfUp):
 		g.cursor -= page / 2
-	case "ctrl+d":
+	case key.Matches(k, keyHalfDown):
 		g.cursor += page / 2
-	case "home", "g":
+	case key.Matches(k, keyTop):
 		g.cursor = 0
-	case "end", "G":
+	case key.Matches(k, keyBottom):
 		g.cursor = len(g.rows) - 1
-	case "left":
+	case key.Matches(k, keyLeft):
 		g.scroll--
-	case "right":
+	case key.Matches(k, keyRight):
 		g.scroll++
-	case "shift+left":
+	case key.Matches(k, keyColLeft):
 		g.col = max(g.col-1, 0)
 		g.reveal()
-	case "shift+right":
+	case key.Matches(k, keyColRight):
 		g.col = min(g.col+1, len(g.titles)-1)
 		g.reveal()
-	case "O":
+	case key.Matches(k, keySort):
 		g.sortOn(g.col)
 	}
 

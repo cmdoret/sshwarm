@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cmdoret/sshwarm/internal/inventory"
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
@@ -13,7 +14,7 @@ import (
 func TestPrintStatus(t *testing.T) {
 	r := fixture(t)
 	var b strings.Builder
-	if ok, err := PrintStatus(&b, []swarm.Report{r, {Host: swarm.Host{Name: "garage-node-neatus"}, Err: errTest}}); ok || err != nil {
+	if ok, err := PrintStatus(&b, []swarm.Report{r, {Host: inventory.Host{Name: "garage-node-neatus"}, Err: errTest}}); ok || err != nil {
 		t.Errorf("all OK: %v, %v", ok, err)
 	}
 	out := b.String()
@@ -50,7 +51,7 @@ func TestPrintStatus(t *testing.T) {
 func TestPrintStatusJSON(t *testing.T) {
 	var b strings.Builder
 
-	ok, err := PrintStatusJSON(&b, []swarm.Report{fixture(t), {Host: swarm.Host{Name: "garage-node-neatus"}, Err: errTest}})
+	ok, err := PrintStatusJSON(&b, []swarm.Report{fixture(t), {Host: inventory.Host{Name: "garage-node-neatus"}, Err: errTest}})
 	if ok || err != nil {
 		t.Errorf("all OK: %v, %v", ok, err)
 	}

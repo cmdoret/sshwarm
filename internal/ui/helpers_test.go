@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/cmdoret/sshwarm/internal/inventory"
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
@@ -19,7 +20,7 @@ func fixture(t *testing.T) swarm.Report {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Host = swarm.Host{Name: "app-node-argiope", Address: "argiope"}
+	r.Host = inventory.Host{Name: "app-node-argiope", Address: "argiope"}
 	return r
 }
 
