@@ -140,6 +140,8 @@ func keyMsg(k string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyShiftLeft}
 	case "shift+right":
 		return tea.KeyMsg{Type: tea.KeyShiftRight}
+	case "ctrl+k":
+		return tea.KeyMsg{Type: tea.KeyCtrlK}
 	}
 
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
@@ -407,6 +409,95 @@ func TestSort(t *testing.T) {
 	s.keys(":", "ctr arg", "enter", "A")
 	s.expect("AGE ↓", "5m")
 	order("immich_redis", "vert", "utils-init-volumes-1", "immich_server", "cook-cookcli-1")
+}
+
+// u, ctrl+k and R start, stop and restart a unit, a stack or a container, once
+// confirmed with y: in the background, saying how it went, then probing again. Any
+// other key cancels. Read-only, there are no actions at all.
+func TestStartStop(t *testing.T) {
+	r := fixture(t)
+	runs := t.TempDir() + "/runs"
+	t.Setenv("RUNS", runs)
+	// The actions' ssh: note what it ran. systemctl fails, as without sudo rights.
+	fakeBin(t, "ssh", `eval remote=\${$#}; echo "$remote" >> "$RUNS"
+case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; esac`)
+
+	s := start(t, r)
+
+	// act types key, confirms with y, and waits for the action's end.
+	act := func(key string) {
+		t.Helper()
+
+		var cmd tea.Cmd
+
+		s.keys(key)
+		s.m, cmd = s.m.Update(keyMsg("y"))
+		s.expect("1 running")
+
+		msg := cmd()
+		if batch, ok := msg.(tea.BatchMsg); ok { // the action, then the spinner's tick if it wasn't turning
+			msg = batch[0]()
+		}
+
+		s.m, cmd = s.m.Update(msg)
+
+		if m := s.m.(model); m.acting != 0 || cmd == nil && !m.stale {
+			t.Errorf("%s: still running, or no refresh after it", key)
+		}
+	}
+
+	// Machines have no actions.
+	s.keys("R")
+
+	if s.m.(model).confirm != nil {
+		t.Error("an action on a machine")
+	}
+
+	// R on the failed unit asks first; another key cancels.
+	s.keys("enter", "R")
+	s.expect("restart broken.service on app-node-argiope? y/N")
+	s.keys("n")
+	s.expect("cancelled")
+
+	// Confirmed, it fails: why shows.
+	act("R")
+	s.expect("restart broken.service failed: sudo: a password is required")
+
+	// ctrl+k on a stack, u on a container.
+	s.keys("tab")
+	act("ctrl+k")
+	s.expect("stopped stack cook")
+
+	// The probe running when it ended may have looked before: another follows.
+	s.m, _ = s.m.Update(reportsMsg{r})
+
+	if m := s.m.(model); !m.refreshing || m.stale {
+		t.Error("no probe after the one running during the action")
+	}
+	s.keys("tab")
+	act("u")
+	s.expect("started container cook-cookcli-1")
+
+	ran, _ := os.ReadFile(runs)
+	if want := swarm.UnitAction("restart", "broken.service") + "\nsudo -n docker compose -p 'cook' stop\nsudo -n docker start 'cook-cookcli-1'\n"; string(ran) != want {
+		t.Errorf("ran:\n%s\nwant:\n%s", ran, want)
+	}
+
+	// Read-only: the keys only say so, and the help doesn't offer them.
+	s.keys("j")
+	s.expect("s shell • J stack • u start • ^k stop • R restart")
+
+	ro := s.m.(model)
+	ro.readOnly = true
+	s.m = ro
+
+	s.keys("R")
+	s.expect("read-only: no actions")
+	s.keys("j")
+
+	if v := s.m.View(); strings.Contains(v, "R restart") || s.m.(model).confirm != nil {
+		t.Errorf("read-only, actions are still offered:\n%s", v)
+	}
 }
 
 // d describes a machine, a unit, a stack or a container, and s opens a shell on a

@@ -57,6 +57,12 @@ func (t *table) resize(width, height int) {
 }
 
 func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
+	if a, ok := actions[k.String()]; ok {
+		t.ask(m, a)
+
+		return nil
+	}
+
 	switch k.String() {
 	case "esc":
 		m.pop()
@@ -142,6 +148,26 @@ func (t *table) selected(m *model) (host int, key string, ok bool) {
 	return slices.IndexFunc(m.reports, func(r swarm.Report) bool { return r.Host.Name == key }), key, true
 }
 
+// ask asks to confirm a on the row under the cursor, if its kind has actions. The
+// row is set now: a refresh could move another under the cursor before it's confirmed.
+func (t *table) ask(m *model, a action) {
+	host, key, ok := t.selected(m)
+	if !ok || t.kind.act == nil {
+		return
+	}
+
+	if m.readOnly {
+		m.flash = "read-only: no actions"
+
+		return
+	}
+
+	r := m.reports[host]
+	a.host = r.Host
+	a.what, a.cmd = t.kind.act(r, a.verb, key)
+	m.confirm = &a
+}
+
 // show runs the command that command gives for the row under the cursor, and shows
 // its output over the table: logs, or with a card to draw it, a description. A nil
 // command means the kind has none.
@@ -208,6 +234,10 @@ func (t *table) view(m *model) string {
 	}
 
 	help := t.kind.help
+	if t.kind.act != nil && !m.readOnly {
+		help += " · " + actionsHelp
+	}
+
 	if t.grid.hidden() > 0 {
 		help += " · ←→ scroll"
 	}

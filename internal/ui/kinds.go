@@ -25,10 +25,29 @@ type kind struct {
 
 	status, age int // the columns S and A sort on; 0 (the name) for none
 
-	describe func(r swarm.Report, key string) (title, cmd string) // nil: nothing to describe
-	card     cardFunc                                             // draws describe's output
-	shell    func(r swarm.Report, key string) (remote string)     // "": a login shell; nil: no shell
+	describe func(r swarm.Report, key string) (title, cmd string)      // nil: nothing to describe
+	card     cardFunc                                                  // draws describe's output
+	shell    func(r swarm.Report, key string) (remote string)          // "": a login shell; nil: no shell
+	act      func(r swarm.Report, verb, key string) (what, cmd string) // start, stop, restart; nil: none
 }
+
+// action is a start, stop or restart of what a row is about: asked for with its key,
+// then confirmed, then run.
+type action struct {
+	verb, done string // "restart", "restarted"
+	what, cmd  string // once asked: "stack immich", and the command that does it
+	host       swarm.Host
+}
+
+// actions are the keys that start, stop and restart, on the kinds that can (act).
+var actions = map[string]action{
+	"u":      {verb: "start", done: "started"}, // up
+	"ctrl+k": {verb: "stop", done: "stopped"},  // k9s's kill
+	"R":      {verb: "restart", done: "restarted"},
+}
+
+// actionsHelp is the actions' keys, for the help line.
+const actionsHelp = "u start · ^k stop · R restart"
 
 // kinds are the command bar's resources.
 var kinds = []*kind{machines, services, stacks, containers}
@@ -149,6 +168,9 @@ var services = &kind{
 		return "describe " + unit, swarm.DescribeUnit(unit)
 	},
 	card: unitCard,
+	act: func(_ swarm.Report, verb, unit string) (string, string) {
+		return unit, swarm.UnitAction(verb, unit)
+	},
 }
 
 // serviceRows lists a machine's interesting units, failed first; with m.all, every
@@ -240,6 +262,9 @@ var stacks = &kind{
 		return "describe stack " + stack, swarm.DescribeStack(r.Docker, stack)
 	},
 	card: stackCard,
+	act: func(r swarm.Report, verb, stack string) (string, string) {
+		return "stack " + stack, swarm.StackAction(r.Docker, verb, stack)
+	},
 }
 
 // containers lists a machine's compose containers, or one stack's.
@@ -274,6 +299,9 @@ var containers = &kind{
 	},
 	card:  containerCard,
 	shell: func(r swarm.Report, name string) string { return swarm.ContainerShell(r.Docker, name) },
+	act: func(r swarm.Report, verb, name string) (string, string) {
+		return "container " + name, swarm.ContainerAction(r.Docker, verb, name)
+	},
 }
 
 func stackRow(r swarm.Report, s swarm.Stack) row {
