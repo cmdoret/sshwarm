@@ -44,6 +44,20 @@ case "$last" in *fail*) exit 3 ;; esac`)
 	}
 }
 
+// A line too long to read ends the stream with a line saying so.
+func TestStreamLongLine(t *testing.T) {
+	testutil.FakeBin(t, "ssh", `echo before; head -c 1100000 /dev/zero | tr '\\0' x; echo`)
+
+	var got []string
+	for line := range Stream(t.Context(), inventory.Host{Address: "h"}, "cmd", false) {
+		got = append(got, line)
+	}
+
+	if want := []string{"before", "[bufio.Scanner: token too long]"}; !slices.Equal(got, want) {
+		t.Errorf("got %d lines, %.60q…, want %q", len(got), got, want)
+	}
+}
+
 // Stream sends clean lines: no escape sequence, colors included, and no stray
 // carriage return; a failure ends them with a line saying so.
 func TestStream(t *testing.T) {

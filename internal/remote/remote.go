@@ -67,8 +67,8 @@ func Interactive(ctx context.Context, h inventory.Host, cmd string) *exec.Cmd {
 }
 
 // Stream runs cmd on h, with a terminal if tty, and sends its output, stdout and
-// stderr, line by line, without control characters; a failure ends it with a line
-// saying so. The channel closes when the command ends or ctx is cancelled.
+// stderr, line by line, without control characters; a failure, of cmd or of
+// reading it, ends it with a line saying so. The channel closes when the command ends or ctx is cancelled.
 func Stream(ctx context.Context, h inventory.Host, cmd string, tty bool) <-chan string {
 	c := Command(ctx, h, tty, cmd)
 	pr, pw := io.Pipe()
@@ -96,6 +96,13 @@ func Stream(ctx context.Context, h inventory.Host, cmd string, tty bool) <-chan 
 			case ch <- Clean(sc.Text()):
 			case <-ctx.Done():
 				return
+			}
+		}
+
+		if err := sc.Err(); err != nil { // a line too long: the rest is cut, say so
+			select {
+			case ch <- "[" + err.Error() + "]":
+			case <-ctx.Done():
 			}
 		}
 	}()
