@@ -90,7 +90,7 @@ flowchart LR
 Container images are also available, but they suffer from a few usability limitations:
 
 * nix is not included in the image, so you can only use `hosts.toml`
-* `hosts.toml` must fully define the hosts, as ssh refuses a mounted `~/..ssh/config`.
+* `hosts.toml` must fully define the hosts, as ssh refuses a mounted `~/.ssh/config`.
 
 ```sh
 docker run --rm -it -v ./hosts.toml:/hosts.toml:ro \
