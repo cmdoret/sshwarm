@@ -191,8 +191,8 @@ var services = &kind{
 	actionHelp: rowActionHelp,
 }
 
-// serviceRows lists a machine's interesting units, failed first; with m.all, every
-// unit.
+// serviceRows lists a machine's interesting units, failed first, then by name
+// ignoring case, as column sorts do; with m.all, every unit.
 func serviceRows(m *model, host int, _ string) []row {
 	r := m.reports[host]
 
@@ -210,7 +210,7 @@ func serviceRows(m *model, host int, _ string) []row {
 			return fi
 		}
 
-		return units[i].Name < units[j].Name
+		return strings.ToLower(units[i].Name) < strings.ToLower(units[j].Name)
 	})
 
 	var rows []row
