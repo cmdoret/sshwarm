@@ -22,9 +22,9 @@ func TestPrintStatus(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]string{
-		"MACHINE":            "MACHINE STATE DEPLOY UP REBOOT UNITS STACKS",
-		"app-node-argiope":   "app-node-argiope degraded 2h 25h yes 2/3 1/3",
-		"garage-node-neatus": "garage-node-neatus down - - - - -",
+		"MACHINE":            "MACHINE STATE DEPLOY UP REBOOT UNITS STACKS CPU MEM DISK",
+		"app-node-argiope":   "app-node-argiope degraded 2h 25h yes 2/3 1/3 12% 74% 93%",
+		"garage-node-neatus": "garage-node-neatus down - - - - - - - -",
 	} {
 		if rows[name] != want {
 			t.Errorf("row %q:\n got %q\nwant %q", name, rows[name], want)
