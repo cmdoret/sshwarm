@@ -22,7 +22,7 @@ func TestPrintStatus(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]string{
-		"MACHINE":            "MACHINE STATE DEPLOY UP REBOOT UNITS STACKS CPU MEM DISK",
+		"MACHINE":            "MACHINE STATE DEPLOY UP REBOOT UNITS STACKS LOAD MEM DISK",
 		"app-node-argiope":   "app-node-argiope degraded 2h 25h yes 2/3 1/3 12% 74% 93%",
 		"garage-node-neatus": "garage-node-neatus down - - - - - - - -",
 	} {

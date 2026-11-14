@@ -72,7 +72,7 @@ var machines = &kind{
 }
 
 // machineTitles head the machines table: `sshwarm status` prints all but PROBLEMS.
-var machineTitles = []string{"MACHINE", "STATE", "DEPLOY", "UP", "REBOOT", "UNITS", "STACKS", "CPU", "MEM", "DISK", "PROBLEMS"}
+var machineTitles = []string{"MACHINE", "STATE", "DEPLOY", "UP", "REBOOT", "UNITS", "STACKS", "LOAD", "MEM", "DISK", "PROBLEMS"}
 
 // machineRow is a machine's row, for both the TUI and `sshwarm status`. Only the
 // fields needing attention are colored, unless the machine is down.
@@ -128,7 +128,7 @@ func machineRow(r swarm.Report) row {
 
 	return row{key: r.Host.Name, cells: []cell{
 		{text: r.Host.Name}, state, deployed, {text: short(r.Uptime)}, reboot, units, stackCell,
-		usageCell(r.CPU), usageCell(r.Memory), usageCell(r.Disk),
+		usageCell(r.Load), usageCell(r.Memory), usageCell(r.Disk),
 		{text: strings.Join(problems, "; "), tone: bad},
 	}}
 }

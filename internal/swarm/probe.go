@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -111,7 +112,7 @@ func Parse(out string) (Report, error) {
 		Now:           unix(kv["now"]),
 		Deployed:      unix(kv["deployed"]),
 		RebootPending: kv["reboot"] == "true",
-		CPU:           usage(kv["cpu"]),
+		Load:          usage(kv["load"]),
 		Memory:        usage(kv["memory"]),
 		Disk:          usage(kv["disk"]),
 		Docker:        kv["docker"],

@@ -57,9 +57,10 @@ if rev=$(nixos-version --configuration-revision 2>/dev/null); then # NixOS, when
   echo "revision=$rev"
 fi
 echo "reboot=$(reboot_pending && echo true || echo false)"
-# Usage in percent (1-minute load per CPU (past 100 when tasks wait).
-echo "cpu=$(awk -v cpus="$(nproc)" '{ print 100 * $1 / cpus }' /proc/loadavg)"
-# Memory not available
+# Usage in percent. The 1-minute load per CPU, past 100 when tasks wait: getconf
+# counts the machine's CPUs, where nproc would obey OMP_NUM_THREADS.
+echo "load=$(awk -v cpus="$(getconf _NPROCESSORS_ONLN)" '{ print 100 * $1 / cpus }' /proc/loadavg)"
+# Memory in use: what isn't available to programs.
 echo "memory=$(awk '/^MemTotal:/ { total = $2 } /^MemAvailable:/ { free = $2 } END { print 100 * (total - free) / total }' /proc/meminfo)"
 # Local devices only to avoid hanging from network mounts
 echo "disk=$(df -P -l -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null |

@@ -357,7 +357,7 @@ func TestActions(t *testing.T) {
 	s.keys("esc", "tab")
 	s.logs("d")
 	s.expect("describe stack cook", "ran: timeout 30 sh -c 'echo")
-	s.ran("echo '### cpus'; nproc", "sudo -n docker ps -a --filter 'label=com.docker.compose.project=cook'", "sudo -n docker stats --no-stream")
+	s.ran("echo '### cpus'; getconf _NPROCESSORS_ONLN", "sudo -n docker ps -a --filter 'label=com.docker.compose.project=cook'", "sudo -n docker stats --no-stream")
 
 	s.keys("esc", "enter")
 	s.logs("d")
