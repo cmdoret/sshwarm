@@ -12,7 +12,7 @@ sshwarm.overrideAttrs {
   buildPhase = ''
     runHook preBuild
     mkdir -p $out/bin
-    GOOS=${goos} GOARCH=${goarch} go build -ldflags "-s -w" -o $out/bin/sshwarm .
+    GOOS=${goos} GOARCH=${goarch} go build -ldflags "$ldflags" -o $out/bin/sshwarm .
     runHook postBuild
   '';
   installPhase = "true";
