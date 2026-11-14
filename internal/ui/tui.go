@@ -23,18 +23,6 @@ import (
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
-// accent marks what sshwarm draws itself, the title, tabs, cursor and keys, apart
-// from the tones of what the machines report. A terminal palette color, like those,
-// so it follows the user's theme.
-var accent = lipgloss.Color("5") // magenta
-
-var (
-	titleStyle = lipgloss.NewStyle().Bold(true)
-	dimStyle   = lipgloss.NewStyle().Faint(true)
-	keyStyle   = lipgloss.NewStyle().Bold(true).Foreground(accent)
-	pillStyle  = keyStyle.Reverse(true)
-)
-
 const (
 	// chrome is the lines a frame adds around a screen's body: the box's top and
 	// bottom edges, and the help line.
@@ -448,9 +436,6 @@ func crumbs(where ...string) string {
 
 	return title.String()
 }
-
-// pill highlights text with the accent color as its background.
-func pill(text string) string { return pillStyle.Render(" " + text + " ") }
 
 // bar is the action to confirm, or the command bar while it's open, or else the
 // message if there is one.

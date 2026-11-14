@@ -8,35 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/mattn/go-runewidth"
 )
-
-// tone colors a row, or one cell when it alone needs attention (like k9s).
-// Terminal palette colors, so they follow the user's theme.
-type tone int
-
-// Tones rank by severity: stackRow keeps the worst with max, and a status sorts on its
-// tone, worst first.
-const (
-	inherit tone = iota // plain for a row; the row's tone for a cell
-	dim
-	good
-	warn
-	bad
-)
-
-var toneStyles = map[tone]lipgloss.Style{
-	good: lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
-	warn: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
-	bad:  lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
-	dim:  dimStyle,
-}
-
-// selection is the cursor row's background: a gray a step off the terminal's own,
-// under which every tone stays readable.
-var selection = lipgloss.AdaptiveColor{Light: "254", Dark: "237"}
 
 type cell struct {
 	text string
@@ -232,12 +205,12 @@ func (g *grid) key(k tea.KeyMsg) {
 func (g grid) natural() (ws []int, total int) {
 	ws = make([]int, len(g.titles))
 	for i := range g.titles {
-		ws[i] = runewidth.StringWidth(g.title(i))
+		ws[i] = ansi.StringWidth(g.title(i))
 	}
 
 	for _, r := range g.rows {
 		for i, c := range r.cells {
-			ws[i] = max(ws[i], runewidth.StringWidth(c.shown()))
+			ws[i] = max(ws[i], ansi.StringWidth(c.shown()))
 		}
 	}
 
@@ -346,5 +319,7 @@ func (g grid) renderRow(i int, widths []int) []string {
 
 // pad fits s in a column w wide, with a space either side.
 func pad(s string, w int) string {
-	return " " + runewidth.FillRight(runewidth.Truncate(s, w, "…"), w) + " "
+	s = ansi.Truncate(s, w, "…")
+
+	return " " + s + strings.Repeat(" ", max(w-ansi.StringWidth(s), 0)) + " "
 }
