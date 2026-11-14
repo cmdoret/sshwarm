@@ -77,6 +77,8 @@ echo "docker=$docker"
 
 section units systemctl show --timestamp=unix --no-pager \
   -p Id,ActiveState,SubState,Description,Result,UnitFileState,StateChangeTimestamp '*.service'
+# The installed units too: systemd unloads a stopped unit that nothing refers to.
+section unit-files systemctl list-unit-files --type=service --no-legend --no-pager
 if [ -n "$docker" ]; then
   # shellcheck disable=SC2086 # words, split on purpose: "sudo -n docker"
   section containers $docker ps -a --filter label=com.docker.compose.project \

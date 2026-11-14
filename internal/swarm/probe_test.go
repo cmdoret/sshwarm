@@ -87,6 +87,26 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// An installed unit that systemd unloaded, stopped with nothing referring to it, is
+// still a unit: inactive. Templates and aliases aren't.
+func TestUnloadedUnits(t *testing.T) {
+	r, err := Parse("### meta\nnow=1\n### units\nId=web.service\nActiveState=active\nUnitFileState=enabled\n" +
+		"### unit-files\nweb.service enabled enabled\nbackup.service enabled enabled\nfsck.service static\n" +
+		"getty@.service enabled enabled\ndbus-org.x.service alias -\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []Unit{
+		{Name: "web.service", Active: "active", UnitFileState: "enabled"},
+		{Name: "backup.service", Active: "inactive", Sub: "dead", UnitFileState: "enabled"},
+		{Name: "fsck.service", Active: "inactive", Sub: "dead", UnitFileState: "static"},
+	}
+	if !slices.Equal(r.Units, want) {
+		t.Errorf("units:\n%+v\nwant:\n%+v", r.Units, want)
+	}
+}
+
 // Elsewhere than NixOS, there is no deploy time or revision, and nothing's wrong.
 func TestParseNotNixOS(t *testing.T) {
 	raw, err := os.ReadFile("testdata/debian.probe")
