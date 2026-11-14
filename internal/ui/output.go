@@ -38,9 +38,9 @@ type logLinesMsg struct {
 	done  bool
 }
 
-// text is a screen showing a remote command's output: logs, as a stream it can
+// output is a screen showing a remote command's output: logs, as a stream it can
 // follow, or a description, drawn as a card once all of it is in.
-type text struct {
+type output struct {
 	title  string // after the machine's name: a unit, "stack db", "describe web-1"...
 	host   inventory.Host
 	cmd    string // as swarm.Stream runs it
@@ -57,187 +57,187 @@ type text struct {
 	shown              string // what the pager shows, unwrapped; "" while loading: what c copies
 }
 
-func newText(title string, h inventory.Host, cmd string, card cardFunc) *text {
-	t := &text{title: title, host: h, cmd: cmd, card: card, wrap: true, pager: viewport.New(0, 0)}
-	t.pager.SetHorizontalStep(8) // left and right, over a card or unwrapped lines
+func newOutput(title string, h inventory.Host, cmd string, card cardFunc) *output {
+	o := &output{title: title, host: h, cmd: cmd, card: card, wrap: true, pager: viewport.New(0, 0)}
+	o.pager.SetHorizontalStep(8) // left and right, over a card or unwrapped lines
 
-	return t
+	return o
 }
 
-func (t *text) open(m *model) tea.Cmd { return t.start(m.ctx, false) }
+func (o *output) open(m *model) tea.Cmd { return o.start(m.ctx, false) }
 
 // start (re)runs the command, following its output or not.
-func (t *text) start(ctx context.Context, follow bool) tea.Cmd {
-	again := t.card != nil && len(t.lines) > 0 // a description stays, where it was scrolled, until the next is in
+func (o *output) start(ctx context.Context, follow bool) tea.Cmd {
+	again := o.card != nil && len(o.lines) > 0 // a description stays, where it was scrolled, until the next is in
 
-	t.stop()
-	ctx, t.cancel = context.WithCancel(ctx)
-	t.follow = follow
-	t.runs++
+	o.stop()
+	ctx, o.cancel = context.WithCancel(ctx)
+	o.follow = follow
+	o.runs++
 
 	if !again {
-		t.shown = ""
-		t.pager.SetContent("loading…")
+		o.shown = ""
+		o.pager.SetContent("loading…")
 	}
 
-	t.ch = swarm.Stream(ctx, t.host, t.cmd, follow)
+	o.ch = swarm.Stream(ctx, o.host, o.cmd, follow)
 
-	return waitLog(t.ch)
+	return waitLog(o.ch)
 }
 
 // stop ends the stream and drops its lines.
-func (t *text) stop() {
-	if t.cancel != nil {
-		t.cancel()
+func (o *output) stop() {
+	if o.cancel != nil {
+		o.cancel()
 	}
 
-	t.cancel, t.ch, t.lines = nil, nil, nil
+	o.cancel, o.ch, o.lines = nil, nil, nil
 }
 
 // add shows a stream's next lines, and waits for more.
-func (t *text) add(msg logLinesMsg) tea.Cmd {
-	bottom := t.pager.AtBottom() || len(t.lines) == 0
+func (o *output) add(msg logLinesMsg) tea.Cmd {
+	bottom := o.pager.AtBottom() || len(o.lines) == 0
 
-	t.lines = append(t.lines, msg.lines...)
-	if len(t.lines) > maxLogLines {
-		t.lines = t.lines[len(t.lines)-maxLogLines:]
+	o.lines = append(o.lines, msg.lines...)
+	if len(o.lines) > maxLogLines {
+		o.lines = o.lines[len(o.lines)-maxLogLines:]
 	}
 
-	if msg.done && t.follow {
-		t.lines = append(t.lines, "[stream ended]")
+	if msg.done && o.follow {
+		o.lines = append(o.lines, "[stream ended]")
 	}
 
 	if msg.done {
-		t.ch, t.refreshed = nil, time.Now() // no stream any more
+		o.ch, o.refreshed = nil, time.Now() // no stream any more
 	}
 
-	t.setContent()
+	o.setContent()
 
-	if bottom && t.card == nil { // logs follow their end; a description opens at its top
-		t.pager.GotoBottom()
+	if bottom && o.card == nil { // logs follow their end; a description opens at its top
+		o.pager.GotoBottom()
 	}
 
 	if msg.done {
 		return nil
 	}
 
-	return waitLog(t.ch)
+	return waitLog(o.ch)
 }
 
 // setContent draws a description's card once all its output is in, or else shows
 // the output as it came, its long lines wrapped to the window unless wrapping is
 // off. Lines wider than the window, a card's or unwrapped, scroll left and right.
-func (t *text) setContent() {
-	if t.showsCard() && t.ch != nil {
+func (o *output) setContent() {
+	if o.showsCard() && o.ch != nil {
 		return // still "loading…", or the last card: not the next one's partial output
 	}
 
-	t.shown = strings.Join(t.lines, "\n")
+	o.shown = strings.Join(o.lines, "\n")
 
-	if t.showsCard() {
-		if drawn, err := t.card(t.shown); err == nil {
-			t.shown = drawn
-			t.pager.SetContent(drawn)
+	if o.showsCard() {
+		if drawn, err := o.card(o.shown); err == nil {
+			o.shown = drawn
+			o.pager.SetContent(drawn)
 
 			return
 		}
 	}
 
-	content := t.shown
-	if t.wrap {
-		content = lipgloss.NewStyle().Width(t.pager.Width).Render(content)
+	content := o.shown
+	if o.wrap {
+		content = lipgloss.NewStyle().Width(o.pager.Width).Render(content)
 	}
 
-	t.pager.SetContent(content)
+	o.pager.SetContent(content)
 }
 
 // resize gives the pager the window, but for the frame unless fullscreen.
-func (t *text) resize(width, height int) {
-	w, h := bodySize(width, height, t.full)
-	t.pager.Width, t.pager.Height = max(w, 1), max(h, 1)
-	t.setContent()
+func (o *output) resize(width, height int) {
+	w, h := bodySize(width, height, o.full)
+	o.pager.Width, o.pager.Height = max(w, 1), max(h, 1)
+	o.setContent()
 }
 
 // update takes a key, the next lines of the stream on screen, or a request to
 // describe again, unless it's for a run since replaced.
-func (t *text) update(m *model, msg tea.Msg) tea.Cmd {
+func (o *output) update(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		return t.key(m, msg)
+		return o.key(m, msg)
 	case logLinesMsg:
-		if msg.ch != t.ch {
+		if msg.ch != o.ch {
 			return nil // a stream since stopped
 		}
 
-		if cmd := t.add(msg); !msg.done || t.card == nil {
+		if cmd := o.add(msg); !msg.done || o.card == nil {
 			return cmd
 		}
 
-		return t.again(m.probes.interval) // a description refreshes as tables do
+		return o.again(m.probes.interval) // a description refreshes as tables do
 	case redescribeMsg:
-		if msg.t == t && msg.run == t.runs {
-			return t.start(m.ctx, false)
+		if msg.o == o && msg.run == o.runs {
+			return o.start(m.ctx, false)
 		}
 	}
 
 	return nil
 }
 
-func (t *text) close()       { t.stop() }
-func (t *text) busy() bool   { return t.card != nil && t.ch != nil } // describing
-func (t *text) typing() bool { return false }
+func (o *output) close()       { o.stop() }
+func (o *output) busy() bool   { return o.card != nil && o.ch != nil } // describing
+func (o *output) typing() bool { return false }
 
-func (t *text) key(m *model, k tea.KeyMsg) tea.Cmd {
+func (o *output) key(m *model, k tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 
 	switch {
 	case key.Matches(k, keyBack):
 		m.pop()
 	case key.Matches(k, keyRefresh): // runs the command again: a description's latest state, or the latest logs
-		return t.start(m.ctx, t.follow)
+		return o.start(m.ctx, o.follow)
 	case key.Matches(k, keyFollow):
-		if t.card == nil {
-			return t.start(m.ctx, !t.follow)
+		if o.card == nil {
+			return o.start(m.ctx, !o.follow)
 		}
 	case key.Matches(k, keyRaw):
-		if t.card != nil {
-			t.raw = !t.raw
-			t.setContent()
-			t.pager.GotoTop()
+		if o.card != nil {
+			o.raw = !o.raw
+			o.setContent()
+			o.pager.GotoTop()
 		}
 	case key.Matches(k, keyWrap):
-		if !t.showsCard() { // a card is drawn whole: nothing in it to wrap
-			t.wrap = !t.wrap
-			t.setContent()
-			t.pager.SetXOffset(0) // wrapped, no line is wider than the window: show them whole
+		if !o.showsCard() { // a card is drawn whole: nothing in it to wrap
+			o.wrap = !o.wrap
+			o.setContent()
+			o.pager.SetXOffset(0) // wrapped, no line is wider than the window: show them whole
 		}
 	case key.Matches(k, keyFull):
-		t.full = !t.full
-		t.resize(m.width, m.height)
+		o.full = !o.full
+		o.resize(m.width, m.height)
 	case key.Matches(k, keyCopy):
-		m.flash = t.copyShown()
+		m.flash = o.copyShown()
 	case key.Matches(k, keyTop):
-		t.pager.GotoTop()
+		o.pager.GotoTop()
 	case key.Matches(k, keyBottom):
-		t.pager.GotoBottom()
+		o.pager.GotoBottom()
 	default:
-		t.pager, cmd = t.pager.Update(k)
+		o.pager, cmd = o.pager.Update(k)
 	}
 
 	return cmd
 }
 
-func (t *text) view(m *model) frame {
-	if t.full {
-		return frame{body: t.pager.View(), full: true}
+func (o *output) view(m *model) frame {
+	if o.full {
+		return frame{body: o.pager.View(), full: true}
 	}
 
-	title := crumbs(t.host.Name, t.title)
+	title := crumbs(o.host.Name, o.title)
 
-	status := dimStyle.Render(fmt.Sprintf("%3.f%%", t.pager.ScrollPercent()*100))
-	if t.card != nil && !t.refreshed.IsZero() { // a description refreshes: say how fresh it is
-		when := dimStyle.Render("refreshed " + t.refreshed.Format(time.TimeOnly))
-		if t.ch != nil {
+	status := dimStyle.Render(fmt.Sprintf("%3.f%%", o.pager.ScrollPercent()*100))
+	if o.card != nil && !o.refreshed.IsZero() { // a description refreshes: say how fresh it is
+		when := dimStyle.Render("refreshed " + o.refreshed.Format(time.TimeOnly))
+		if o.ch != nil {
 			when = m.spin.View() + dimStyle.Render(" refreshing")
 		}
 
@@ -247,35 +247,35 @@ func (t *text) view(m *model) frame {
 	var help []key.Binding
 
 	switch {
-	case t.follow:
+	case o.follow:
 		help = append(help, as(keyFollow, "stop following"))
-	case t.card == nil:
+	case o.card == nil:
 		help = append(help, keyFollow)
-	case t.raw:
+	case o.raw:
 		help = append(help, as(keyRaw, "card"))
 	default:
 		help = append(help, keyRaw)
 	}
 
-	if !t.showsCard() {
+	if !o.showsCard() {
 		help = append(help, keyWrap)
 	}
 
 	help = append(help, keyFull, keyCopy, keyTopBottom, keyRefresh, keyBack, keyQuit)
 
-	return frame{title: title, status: status, body: t.pager.View(), help: help}
+	return frame{title: title, status: status, body: o.pager.View(), help: help}
 }
 
 // redescribeMsg asks a description's screen to run again, unless it's closed or ran
 // since, at r.
 type redescribeMsg struct {
-	t   *text
+	o   *output
 	run int
 }
 
 // again describes again after a while, as tables refresh.
-func (t *text) again(after time.Duration) tea.Cmd {
-	msg := redescribeMsg{t, t.runs}
+func (o *output) again(after time.Duration) tea.Cmd {
+	msg := redescribeMsg{o, o.runs}
 
 	return tea.Tick(after, func(time.Time) tea.Msg { return msg })
 }
@@ -283,22 +283,22 @@ func (t *text) again(after time.Duration) tea.Cmd {
 // copyShown puts what's on screen on the clipboard, without colors: a card, never
 // the output it hides, or the output's lines as they came, not as wrapped. It says
 // what it did.
-func (t *text) copyShown() string {
-	if t.shown == "" {
+func (o *output) copyShown() string {
+	if o.shown == "" {
 		return "nothing to copy"
 	}
 
-	s := ansi.Strip(t.shown)
+	s := ansi.Strip(o.shown)
 	copyText(s)
 
 	return fmt.Sprintf("copied %d lines", strings.Count(s, "\n")+1)
 }
 
 // showsCard says whether the screen shows its output as a card, not as it came.
-func (t *text) showsCard() bool { return t.card != nil && !t.raw }
+func (o *output) showsCard() bool { return o.card != nil && !o.raw }
 
 // waitLog delivers the next lines of a stream, gathered for up to 50 ms, so a
-// busy stream doesn't re-render the screen for every line.
+// busy stream doesn'o re-render the screen for every line.
 func waitLog(ch <-chan string) tea.Cmd {
 	return func() tea.Msg {
 		line, ok := <-ch
