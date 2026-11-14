@@ -23,6 +23,8 @@ type kind struct {
 	enter  func(m *model, host int, key string) tea.Cmd         // the next level; nil: the logs
 	logs   func(r swarm.Report, key string) (title, cmd string) // nil: no logs
 
+	status, age int // the columns S and A sort on; 0 (the name) for none
+
 	describe func(r swarm.Report, key string) (title, cmd string) // nil: nothing to describe
 	card     cardFunc                                             // draws describe's output
 	shell    func(r swarm.Report, key string) (remote string)     // "": a login shell; nil: no shell
@@ -41,9 +43,10 @@ func kindNamed(name string) *kind {
 	return kinds[i]
 }
 
-// tabsOf lists a machine's kinds, in tab order: stacks and containers only with docker.
+// tabsOf lists a machine's kinds, in tab order: stacks and containers only if it has
+// some, so that a machine with docker but nothing in it looks like one without.
 func tabsOf(r swarm.Report) []*kind {
-	if r.Docker != "" {
+	if len(r.Stacks) > 0 {
 		return []*kind{services, stacks, containers}
 	}
 
@@ -57,6 +60,8 @@ var machines = &kind{
 	names:  []string{"machines"},
 	help:   "enter open · d describe · s ssh",
 	titles: machineTitles,
+	status: 1,
+	age:    2, // DEPLOY: what changed last, as services' AGE
 	rows: func(m *model, _ int, _ string) []row {
 		var rows []row
 		for _, r := range m.reports {
@@ -78,27 +83,24 @@ var machineTitles = []string{"MACHINE", "STATE", "DEPLOY", "UP", "REBOOT", "UNIT
 // fields needing attention are colored, unless the machine is down.
 func machineRow(r swarm.Report) row {
 	if r.Err != nil {
-		cells := slices.Repeat([]cell{{text: "-"}}, len(machineTitles))
-		cells[0], cells[1], cells[len(cells)-1] = cell{text: r.Host.Name}, dot(bad, "down"), cell{text: r.Err.Error()}
+		cells := slices.Repeat([]cell{{text: "-", rank: -1}}, len(machineTitles)) // unknown: last, biggest first
+		cells[0], cells[1], cells[len(cells)-1] = cell{text: r.Host.Name}, stateCell(bad, "down"), cell{text: r.Err.Error()}
 
 		return row{tone: bad, key: r.Host.Name, cells: cells}
 	}
 
 	problems := r.Problems()
 
-	state := dot(good, "ok")
+	state := stateCell(good, "ok")
 	if len(problems) > 0 {
-		state = dot(warn, "degraded")
+		state = stateCell(warn, "degraded")
 	}
 
-	deployed := cell{text: "-"}
-	if !r.Deployed.IsZero() {
-		deployed.text = short(r.Age(r.Deployed))
-	}
+	deployed := ageCell(r, r.Deployed)
 
 	reboot := cell{text: "no"}
 	if r.RebootPending {
-		reboot = cell{text: "yes", tone: warn}
+		reboot = cell{text: "yes", tone: warn, rank: 1}
 	}
 
 	// Units as stacks: how many of those the services tab lists are fine.
@@ -111,7 +113,7 @@ func machineRow(r swarm.Report) row {
 
 	failed := len(r.Failed())
 
-	units := cell{text: fmt.Sprintf("%d/%d", watched-failed, watched)}
+	units := cell{text: fmt.Sprintf("%d/%d", watched-failed, watched), rank: float64(failed)}
 	if failed > 0 {
 		units.tone = bad
 	}
@@ -120,14 +122,14 @@ func machineRow(r swarm.Report) row {
 	if r.Docker != "" {
 		up := r.StacksUp()
 
-		stackCell.text = fmt.Sprintf("%d/%d", up, len(r.Stacks))
+		stackCell = cell{text: fmt.Sprintf("%d/%d", up, len(r.Stacks)), rank: float64(len(r.Stacks) - up)}
 		if up < len(r.Stacks) {
 			stackCell.tone = bad
 		}
 	}
 
 	return row{key: r.Host.Name, cells: []cell{
-		{text: r.Host.Name}, state, deployed, {text: short(r.Uptime)}, reboot, units, stackCell,
+		{text: r.Host.Name}, state, deployed, {text: short(r.Uptime), rank: r.Uptime.Seconds()}, reboot, units, stackCell,
 		usageCell(r.Load), usageCell(r.Memory), usageCell(r.Disk),
 		{text: strings.Join(problems, "; "), tone: bad},
 	}}
@@ -139,6 +141,8 @@ var services = &kind{
 	names:  []string{"services", "svc"},
 	help:   "enter logs · d describe",
 	titles: []string{"UNIT", "ACTIVE", "SUB", "RESULT", "AGE", "DESCRIPTION"},
+	status: 1,
+	age:    4,
 	rows:   serviceRows,
 	logs:   func(_ swarm.Report, unit string) (string, string) { return unit, swarm.UnitLogs(unit) },
 	describe: func(_ swarm.Report, unit string) (string, string) {
@@ -178,10 +182,7 @@ func serviceRows(m *model, host int, _ string) []row {
 }
 
 func unitRow(r swarm.Report, u swarm.Unit) row {
-	age := "-"
-	if !u.Since.IsZero() {
-		age = short(r.Age(u.Since))
-	}
+	age := ageCell(r, u.Since)
 
 	result := cell{text: u.Result}
 	if u.Result != "" && u.Result != "success" {
@@ -189,7 +190,7 @@ func unitRow(r swarm.Report, u swarm.Unit) row {
 	}
 
 	state := unitTone(u.Active)
-	line := row{key: u.Name, cells: []cell{dot(state, u.Name), {text: u.Active, tone: state}, {text: u.Sub}, result, {text: age}, {text: u.Description}}}
+	line := row{key: u.Name, cells: []cell{dot(state, u.Name), {text: u.Active, tone: state, rank: float64(state)}, {text: u.Sub}, result, age, {text: u.Description}}}
 
 	if state == bad || state == dim { // the whole row: failed stands out, inactive fades
 		line.tone = state
@@ -218,11 +219,15 @@ func unitTone(active string) tone {
 var stacks = &kind{
 	names:  []string{"stacks", "st"},
 	help:   "enter containers · l logs · d describe",
-	titles: []string{"STACK", "OK", "PROBLEMS"},
+	titles: []string{"STACK", "OK", "AGE", "PROBLEMS"},
+	status: 1,
+	age:    2, // its youngest container's: the time since anything in it started or stopped
 	rows: func(m *model, host int, _ string) []row {
+		r := m.reports[host]
+
 		var rows []row
-		for _, s := range m.reports[host].Stacks {
-			rows = append(rows, stackRow(s))
+		for _, s := range r.Stacks {
+			rows = append(rows, stackRow(r, s))
 		}
 
 		return rows
@@ -240,18 +245,22 @@ var stacks = &kind{
 // containers lists a machine's compose containers, or one stack's.
 var containers = &kind{
 	names:  []string{"containers", "ctr"},
-	help:   "enter logs · d describe · s shell",
-	titles: []string{"CONTAINER", "STACK", "STATE", "STATUS"},
+	help:   "enter logs · d describe · s shell · J stack",
+	titles: []string{"CONTAINER", "STACK", "STATE", "AGE", "STATUS"},
+	status: 2,
+	age:    3, // the time since it last started or stopped, as services' AGE
 	rows: func(m *model, host int, stack string) []row {
+		r := m.reports[host]
+
 		var rows []row
 
-		for _, s := range m.reports[host].Stacks {
+		for _, s := range r.Stacks {
 			if stack != "" && s.Name != stack {
 				continue
 			}
 
 			for _, c := range s.Containers {
-				rows = append(rows, containerRow(s.Name, c))
+				rows = append(rows, containerRow(r, s.Name, c))
 			}
 		}
 
@@ -267,7 +276,7 @@ var containers = &kind{
 	shell: func(r swarm.Report, name string) string { return swarm.ContainerShell(r.Docker, name) },
 }
 
-func stackRow(s swarm.Stack) row {
+func stackRow(r swarm.Report, s swarm.Stack) row {
 	worst := good
 
 	var problems []string
@@ -281,25 +290,28 @@ func stackRow(s swarm.Stack) row {
 		}
 	}
 
-	ok := fmt.Sprintf("%d/%d", len(s.Containers)-len(s.Bad()), len(s.Containers))
-	r := row{key: s.Name, cells: []cell{dot(worst, s.Name), {text: ok, tone: worst}, {text: strings.Join(problems, "; ")}}}
+	broken := len(s.Bad())
+	ok := cell{text: fmt.Sprintf("%d/%d", len(s.Containers)-broken, len(s.Containers)), tone: worst, rank: float64(broken)}
+	line := row{key: s.Name, cells: []cell{dot(worst, s.Name), ok, ageCell(r, s.Since()), {text: strings.Join(problems, "; ")}}}
 
 	if worst == bad {
-		r.tone = bad
+		line.tone = bad
 	}
 
-	return r
+	return line
 }
 
-func containerRow(stack string, c swarm.Container) row {
+func containerRow(r swarm.Report, stack string, c swarm.Container) row {
 	t := containerTone(c)
-	r := row{key: c.Name, cells: []cell{dot(t, c.Name), {text: stack}, {text: c.State, tone: t}, {text: c.Status}}}
+	line := row{key: c.Name, owner: stack, cells: []cell{
+		dot(t, c.Name), {text: stack}, {text: c.State, tone: t, rank: float64(t)}, ageCell(r, c.Since), {text: c.Status},
+	}}
 
 	if t == bad {
-		r.tone = bad
+		line.tone = bad
 	}
 
-	return r
+	return line
 }
 
 // containerTone rates c: restarting is a crash loop, so bad; starting is fine for now.
@@ -330,14 +342,34 @@ func short(d time.Duration) string {
 	return strconv.Itoa(int(d.Hours()/24)) + "d"
 }
 
+// ageCell shows the time since t, on the host's clock, short, and sorts on it; "-"
+// for the zero time, sorting last.
+func ageCell(r swarm.Report, t time.Time) cell {
+	if t.IsZero() {
+		return cell{text: "-", rank: -1}
+	}
+
+	d := r.Age(t)
+
+	return cell{text: short(d), rank: d.Seconds()}
+}
+
+// stateCell is a machine's state: it sorts on its tone, worst first.
+func stateCell(t tone, text string) cell {
+	c := dot(t, text)
+	c.rank = float64(t)
+
+	return c
+}
+
 // usageCell shows a percentage, in the describe card's colors (usageTone) but only
 // once it needs attention, as the table's other fields; "-" if unknown.
 func usageCell(percent float64) cell {
 	if percent < 0 {
-		return cell{text: "-"}
+		return cell{text: "-", rank: -1}
 	}
 
-	c := cell{text: fmt.Sprintf("%.0f%%", percent)}
+	c := cell{text: fmt.Sprintf("%.0f%%", percent), rank: percent}
 	if t := usageTone(percent / 100); t != good {
 		c.tone = t
 	}

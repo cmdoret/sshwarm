@@ -50,7 +50,7 @@ func TestTones(t *testing.T) {
 
 	stacks := map[string]row{}
 	for _, s := range r.Stacks {
-		stacks[s.Name] = stackRow(s)
+		stacks[s.Name] = stackRow(r, s)
 	}
 	if s := stacks["immich"]; s.tone != bad || s.cells[0].tone != bad {
 		t.Errorf("unhealthy stack: %+v", s)
@@ -59,7 +59,7 @@ func TestTones(t *testing.T) {
 		t.Errorf("healthy stack (init container done): %+v", s)
 	}
 	starting := swarm.Stack{Name: "s", Containers: []swarm.Container{{State: "running", Status: "Up 3 seconds (health: starting)"}}}
-	if s := stackRow(starting); s.tone != inherit || s.cells[0].tone != warn {
+	if s := stackRow(r, starting); s.tone != inherit || s.cells[0].tone != warn {
 		t.Errorf("starting stack: %+v", s)
 	}
 }
@@ -124,6 +124,23 @@ func TestGridScroll(t *testing.T) {
 
 	if g.scroll != 0 {
 		t.Errorf("scrolled back to %d", g.scroll)
+	}
+
+	// Selecting a column scrolls it into view: the last, then the second.
+	for range len(machineTitles) {
+		g.key(tea.KeyMsg{Type: tea.KeyShiftRight})
+	}
+
+	if head, _, _ := strings.Cut(g.view(), "\n"); g.col != len(machineTitles)-1 || !strings.Contains(head, "PROBLEMS") {
+		t.Errorf("column %d selected, header %q", g.col, head)
+	}
+
+	for range len(machineTitles) - 2 {
+		g.key(tea.KeyMsg{Type: tea.KeyShiftLeft})
+	}
+
+	if g.col != 1 || g.scroll != 0 {
+		t.Errorf("column %d selected, scrolled %d", g.col, g.scroll)
 	}
 
 	g.width = 1000

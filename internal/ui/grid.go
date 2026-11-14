@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"cmp"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,12 +15,14 @@ import (
 // Terminal palette colors, so they follow the user's theme.
 type tone int
 
+// Tones rank by severity: stackRow keeps the worst with max, and a status sorts on its
+// tone, worst first.
 const (
 	inherit tone = iota // plain for a row; the row's tone for a cell
+	dim
 	good
 	warn
-	bad // the worst: stackRow ranks tones with max
-	dim
+	bad
 )
 
 var toneStyles = map[tone]lipgloss.Style{
@@ -35,7 +39,8 @@ var selection = lipgloss.AdaptiveColor{Light: "254", Dark: "237"}
 type cell struct {
 	text string
 	tone tone
-	dot  bool // a status glyph in front, colored by tone
+	dot  bool    // a status glyph in front, colored by tone
+	rank float64 // what the cell sorts by, before its text: a duration, a percentage, a severity
 }
 
 func (c cell) shown() string {
@@ -46,29 +51,86 @@ func (c cell) shown() string {
 	return c.text
 }
 
-func dot(t tone, text string) cell { return cell{text, t, true} }
+func dot(t tone, text string) cell { return cell{text: text, tone: t, dot: true} }
 
 // row is one line of a grid: a cell per column.
 type row struct {
 	cells []cell
 	tone  tone
 	key   string // what the row is about: a machine, unit, stack or container name
+	owner string // what that belongs to: a container's stack
 }
 
-// grid is a scrolling table with one selected row. Unlike bubbles/table, it colors
-// cells without miscounting their width. Columns too wide for it scroll sideways,
-// under the first one, which names the row.
+// grid is a scrolling table with one selected row, and one selected column to sort
+// on. Unlike bubbles/table, it colors cells without miscounting their width. Columns
+// too wide for it scroll sideways, under the first one, which names the row.
 type grid struct {
 	titles         []string
 	rows           []row
 	cursor, offset int
+	col            int // the selected column; -1 for none, as in cards
 	scroll         int // how many columns after the first are scrolled out of view
 	width, height  int // the space it has, header included
+
+	sorted  bool // on sortCol, descending or not; else the rows keep their kind's order
+	sortCol int
+	desc    bool
 }
 
+// setRows shows rows, sorted as the grid is, with the cursor on the row it was on if
+// that's still there: a refresh or a sort moves rows around.
 func (g *grid) setRows(rows []row) {
+	key := ""
+	if g.cursor < len(g.rows) {
+		key = g.rows[g.cursor].key
+	}
+
 	g.rows = rows
+	g.sort()
+	g.choose(key)
+}
+
+// choose puts the cursor on the row about key, if there's one.
+func (g *grid) choose(key string) {
+	if i := slices.IndexFunc(g.rows, func(r row) bool { return r.key == key }); i >= 0 {
+		g.cursor = i
+	}
+
 	g.clamp()
+}
+
+// sortOn selects column col and sorts the rows on it: numbers biggest first, text
+// from A, or the other way round if they already are sorted on it.
+func (g *grid) sortOn(col int) {
+	if g.sorted && g.sortCol == col {
+		g.desc = !g.desc
+	} else {
+		g.sorted, g.sortCol = true, col
+		g.desc = slices.ContainsFunc(g.rows, func(r row) bool { return r.cells[col].rank != 0 })
+	}
+
+	g.col = col
+	g.reveal()
+	g.setRows(g.rows)
+}
+
+// sort orders the rows on the sorted column, by rank then text, ignoring case as the
+// filter does. Ties keep their order.
+func (g *grid) sort() {
+	if !g.sorted {
+		return
+	}
+
+	slices.SortStableFunc(g.rows, func(a, b row) int {
+		x, y := a.cells[g.sortCol], b.cells[g.sortCol]
+
+		c := cmp.Or(cmp.Compare(x.rank, y.rank), cmp.Compare(strings.ToLower(x.text), strings.ToLower(y.text)))
+		if g.desc {
+			return -c
+		}
+
+		return c
+	})
 }
 
 // visible is the number of rows shown under the header.
@@ -86,22 +148,41 @@ func (g *grid) clamp() {
 // others fit, or only the last one is left.
 func (g grid) hidden() int {
 	ws := g.widths()
-	room := g.width - (ws[0] + 2) // what the first column and its padding leave
-
-	rest := 0
-	for _, w := range ws[1:] {
-		rest += w + 2
-	}
 
 	n := 0
-	for ; rest > room && n < len(ws)-2; n++ {
-		rest -= ws[1+n] + 2
+	for n < len(ws)-2 && span(ws[:1])+span(ws[1+n:]) > g.width {
+		n++
 	}
 
 	return n
 }
 
-// key moves the cursor, or scrolls the columns.
+// reveal scrolls the columns so that the selected one is in view.
+func (g *grid) reveal() {
+	if g.col < 1 {
+		return // the first column is always in view
+	}
+
+	ws := g.widths()
+
+	// From the column right after the first, at most: it then comes first.
+	g.scroll = min(g.scroll, g.col-1)
+	for g.scroll < g.col-1 && span(ws[:1])+span(ws[1+g.scroll:g.col+1]) > g.width {
+		g.scroll++
+	}
+}
+
+// span is how wide columns are, with their padding.
+func span(ws []int) int {
+	n := 0
+	for _, w := range ws {
+		n += w + 2
+	}
+
+	return n
+}
+
+// key moves the cursor, scrolls the columns, or selects one and sorts on it.
 func (g *grid) key(k tea.KeyMsg) {
 	page := g.visible()
 
@@ -126,6 +207,14 @@ func (g *grid) key(k tea.KeyMsg) {
 		g.scroll--
 	case "right":
 		g.scroll++
+	case "shift+left":
+		g.col = max(g.col-1, 0)
+		g.reveal()
+	case "shift+right":
+		g.col = min(g.col+1, len(g.titles)-1)
+		g.reveal()
+	case "O":
+		g.sortOn(g.col)
 	}
 
 	g.clamp()
@@ -135,8 +224,8 @@ func (g *grid) key(k tea.KeyMsg) {
 // and their padding.
 func (g grid) natural() (ws []int, total int) {
 	ws = make([]int, len(g.titles))
-	for i, t := range g.titles {
-		ws[i] = runewidth.StringWidth(t)
+	for i := range g.titles {
+		ws[i] = runewidth.StringWidth(g.title(i))
 	}
 
 	for _, r := range g.rows {
@@ -145,12 +234,19 @@ func (g grid) natural() (ws []int, total int) {
 		}
 	}
 
-	total = 2 * len(ws) // every column's padding
-	for _, w := range ws {
-		total += w
+	return ws, span(ws)
+}
+
+// title is column i's title, with an arrow if the rows are sorted on it.
+func (g grid) title(i int) string {
+	switch {
+	case !g.sorted || i != g.sortCol:
+		return g.titles[i]
+	case g.desc:
+		return g.titles[i] + " ↓"
 	}
 
-	return ws, total
+	return g.titles[i] + " ↑"
 }
 
 // widths fits each column to its widest cell, the last taking any room left. If
@@ -177,8 +273,14 @@ func (g grid) view() string {
 	ws := g.widths()
 
 	var head []string
-	for i, t := range g.titles {
-		head = append(head, titleStyle.Render(pad(t, ws[i])))
+
+	for i := range g.titles {
+		st := titleStyle
+		if i == g.col {
+			st = keyStyle // the accent, as the cursor's marker
+		}
+
+		head = append(head, st.Render(pad(g.title(i), ws[i])))
 	}
 
 	var b strings.Builder

@@ -8,16 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
-// A card is a description made readable, like k9s's: headed sections of aligned
-// fields, tables, and bars for what's used. Each kind's card parses its describe
-// command's output with swarm, and draws it to a width. On an error, the text screen
-// shows the output as it came instead.
+// A card is a human-readable description with values rendered into fields,
+// tables, and bars for what's used. Each kind's card parses its describe
+// command's output with swarm, and draws it whole: lines wider than the window
+// scroll left and right. On an error, the text screen shows the output as it came
+// instead.
 
 const (
 	// keyWidth is the column fields' values start at: two spaces past "Triggered
@@ -28,23 +26,12 @@ const (
 	barWidth, cellBar = 20, 10
 )
 
-// cardFunc draws a describe command's output as a card, width wide, or with width
-// 0, as wide as its content.
-type cardFunc func(out string, width int) (string, error)
+// cardFunc draws a describe command's output as a card.
+type cardFunc func(out string) (string, error)
 
-type card struct {
-	b     strings.Builder
-	width int
-}
+type card struct{ b strings.Builder }
 
-// line adds a line, cut to the card's width, if it has one.
-func (c *card) line(s string) {
-	if c.width > 0 {
-		s = ansi.Truncate(s, c.width, "…")
-	}
-
-	c.b.WriteString(s + "\n")
-}
+func (c *card) line(s string) { c.b.WriteString(s + "\n") }
 
 // section starts a headed block, after a blank line unless it's the first.
 func (c *card) section(name string) {
@@ -83,12 +70,11 @@ func (c *card) list(name string, items []string) {
 	}
 }
 
-// table adds a table, as the TUI's tables look but without a cursor.
+// table adds a table, as the TUI's tables look but without a cursor or a selected
+// column, as wide as its cells.
 func (c *card) table(titles []string, rows []row) {
-	g := grid{titles: titles, rows: rows, width: c.width, height: len(rows) + 1, cursor: -1}
-	if c.width <= 0 {
-		_, g.width = g.natural()
-	}
+	g := grid{titles: titles, rows: rows, height: len(rows) + 1, cursor: -1, col: -1}
+	_, g.width = g.natural()
 
 	for _, l := range strings.Split(g.view(), "\n") {
 		c.line(l)
@@ -157,13 +143,13 @@ func joined(parts ...string) string {
 
 // machineCard: what the machine is, how much of it is used, its disks and busiest
 // processes.
-func machineCard(out string, width int) (string, error) {
+func machineCard(out string) (string, error) {
 	m, err := swarm.ParseMachine(out)
 	if err != nil {
 		return "", err
 	}
 
-	c := card{width: width}
+	var c card
 
 	virt := m.Virt
 	if virt == "none" {
@@ -219,13 +205,13 @@ func machineCard(out string, width int) (string, error) {
 }
 
 // unitCard: the unit's state, its process, what it uses, and its last log lines.
-func unitCard(out string, width int) (string, error) {
+func unitCard(out string) (string, error) {
 	u, err := swarm.ParseUnit(out)
 	if err != nil {
 		return "", err
 	}
 
-	c := card{width: width}
+	var c card
 
 	state := toneStyles[unitTone(u.Active)].Render("● " + u.Active + " (" + u.Sub + ")")
 
@@ -286,13 +272,13 @@ func unitCard(out string, width int) (string, error) {
 }
 
 // stackCard: the stack's containers, and what each uses.
-func stackCard(out string, width int) (string, error) {
+func stackCard(out string) (string, error) {
 	s, err := swarm.ParseStack(out)
 	if err != nil {
 		return "", err
 	}
 
-	c := card{width: width}
+	var c card
 
 	ok := 0
 
@@ -321,13 +307,13 @@ func stackCard(out string, width int) (string, error) {
 
 // containerCard: the container's state, what it uses, its health, ports, networks,
 // mounts, and the names of its environment's variables (not their values).
-func containerCard(out string, width int) (string, error) {
+func containerCard(out string) (string, error) {
 	ci, err := swarm.ParseContainer(out)
 	if err != nil {
 		return "", err
 	}
 
-	c := card{width: width}
+	var c card
 
 	t := good
 
@@ -392,19 +378,7 @@ func containerCard(out string, width int) (string, error) {
 	c.list("Ports", ci.Ports)
 	c.list("Networks", ci.Networks)
 	c.list("Mounts", ci.Mounts)
-
-	if len(ci.EnvNames) > 0 {
-		c.section("Environment " + dimStyle.Render("(values hidden)"))
-
-		names := strings.Join(ci.EnvNames, "  ")
-		if c.width > 0 {
-			names = lipgloss.NewStyle().Width(max(c.width-2, 1)).Render(names)
-		}
-
-		for _, l := range strings.Split(names, "\n") {
-			c.line("  " + strings.TrimRight(l, " "))
-		}
-	}
+	c.list("Environment "+dimStyle.Render("(values hidden)"), ci.EnvNames)
 
 	return c.String(), nil
 }
