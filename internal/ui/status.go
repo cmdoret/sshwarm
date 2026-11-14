@@ -11,12 +11,11 @@ import (
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
-// PrintStatus writes the machines table, then what's wrong.
-// It returns false if any machine is unreachable or has a problem.
-func PrintStatus(w io.Writer, reports []swarm.Report) bool {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+// PrintStatus writes the machines table, then what's wrong. It returns false if any
+// machine is unreachable or has a problem, and the error of writing to w, if any.
+func PrintStatus(w io.Writer, reports []swarm.Report) (bool, error) {
 	columns := len(machineTitles) - 1 // PROBLEMS go below the table
-	fmt.Fprintln(tw, strings.Join(machineTitles[:columns], "\t"))
+	lines := []string{strings.Join(machineTitles[:columns], "\t")}
 
 	var details []string
 
@@ -26,20 +25,29 @@ func PrintStatus(w io.Writer, reports []swarm.Report) bool {
 			cells = append(cells, c.text)
 		}
 
-		fmt.Fprintln(tw, strings.Join(cells, "\t"))
+		lines = append(lines, strings.Join(cells, "\t"))
 
 		for _, p := range r.Problems() {
 			details = append(details, r.Host.Name+" "+p)
 		}
 	}
 
-	tw.Flush()
-
-	if len(details) > 0 {
-		fmt.Fprintf(w, "\n%s\n", strings.Join(details, "\n"))
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if _, err := io.WriteString(tw, strings.Join(lines, "\n")+"\n"); err != nil {
+		return false, err
 	}
 
-	return len(details) == 0
+	if err := tw.Flush(); err != nil {
+		return false, err
+	}
+
+	if len(details) > 0 {
+		if _, err := fmt.Fprintf(w, "\n%s\n", strings.Join(details, "\n")); err != nil {
+			return false, err
+		}
+	}
+
+	return len(details) == 0, nil
 }
 
 // machineJSON is a machine in `sshwarm status --format json`: the table's columns as

@@ -76,7 +76,7 @@ func (c *card) table(titles []string, rows []row) {
 	g := grid{titles: titles, rows: rows, height: len(rows) + 1, cursor: -1, col: -1}
 	_, g.width = g.natural()
 
-	for _, l := range strings.Split(g.view(), "\n") {
+	for l := range strings.SplitSeq(g.view(), "\n") {
 		c.line(l)
 	}
 }

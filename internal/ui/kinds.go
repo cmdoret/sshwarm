@@ -151,7 +151,10 @@ func machineRow(r swarm.Report) row {
 	}
 
 	return row{key: r.Host.Name, cells: []cell{
-		{text: r.Host.Name}, state, deployed, {text: short(r.Uptime), rank: r.Uptime.Seconds()}, reboot, units, stackCell,
+		{text: r.Host.Name},
+		state, deployed,
+		{text: short(r.Uptime), rank: r.Uptime.Seconds()},
+		reboot, units, stackCell,
 		usageCell(r.Load), usageCell(r.Memory), usageCell(r.Disk),
 		{text: strings.Join(problems, "; "), tone: bad},
 	}}

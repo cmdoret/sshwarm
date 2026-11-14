@@ -453,12 +453,13 @@ func (m *model) frame(title, status, body, help string) string {
 // crumbs is a screen's title: sshwarm, then where the screen is, as in
 // "sshwarm › web-1 › stack db".
 func crumbs(where ...string) string {
-	title := pill("sshwarm")
+	var title strings.Builder
+	title.WriteString(pill("sshwarm"))
 	for _, w := range where {
-		title += dimStyle.Render(" › ") + titleStyle.Render(w)
+		title.WriteString(dimStyle.Render(" › ") + titleStyle.Render(w))
 	}
 
-	return title
+	return title.String()
 }
 
 // pill highlights text with the accent color as its background.
@@ -469,7 +470,7 @@ func pill(text string) string { return pillStyle.Render(" " + text + " ") }
 func helpLine(help string) string {
 	var parts []string
 
-	for _, p := range strings.Split(help, " · ") {
+	for p := range strings.SplitSeq(help, " · ") {
 		key, what, _ := strings.Cut(p, " ")
 		parts = append(parts, keyStyle.Render(key)+" "+dimStyle.Render(what))
 	}
@@ -506,8 +507,8 @@ func (m model) refreshStatus() string {
 }
 
 // Run browses the machines until the user quits; readOnly, without actions or shells.
-func Run(hosts []swarm.Host, timeout, interval time.Duration, readOnly bool) error {
-	ctx, cancel := context.WithCancel(context.Background())
+func Run(ctx context.Context, hosts []swarm.Host, timeout, interval time.Duration, readOnly bool) error {
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // however the TUI ends, no log stream or probe outlives it
 
 	m := newModel(ctx, hosts, timeout, interval)

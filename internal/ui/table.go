@@ -284,7 +284,7 @@ func (t *table) view(m *model) string {
 		return m.frame(title, m.refreshStatus(), toneStyles[bad].Render("down: "+r.Err.Error()), "r refresh · esc back · q quit")
 	}
 
-	var tabs string
+	var tabs strings.Builder
 
 	for _, k := range tabsOf(r) {
 		n := len(t.grid.rows) // the current tab: its rows, as shown
@@ -294,9 +294,9 @@ func (t *table) view(m *model) string {
 
 		tab := fmt.Sprintf("%s %d", k.names[0], n)
 		if k == t.kind {
-			tabs += pill(tab) + " "
+			tabs.WriteString(pill(tab) + " ")
 		} else {
-			tabs += dimStyle.Render(" "+tab+" ") + " "
+			tabs.WriteString(dimStyle.Render(" "+tab+" ") + " ")
 		}
 	}
 
@@ -309,7 +309,7 @@ func (t *table) view(m *model) string {
 		help += " · a " + scope + " units"
 	}
 
-	return m.frame(title, m.refreshStatus(), tabs+filter+"\n"+t.grid.view(), help+" · tab switch · / filter · : go to · esc back · q quit")
+	return m.frame(title, m.refreshStatus(), tabs.String()+filter+"\n"+t.grid.view(), help+" · tab switch · / filter · : go to · esc back · q quit")
 }
 
 // revision is " · rev <commit>" for the title, warning when the tree was dirty; ""

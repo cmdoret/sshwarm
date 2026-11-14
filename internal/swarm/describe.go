@@ -102,7 +102,7 @@ func ParseMachine(out string) (Machine, error) {
 		}
 	}
 
-	for _, line := range strings.Split(sec["memory"], "\n") {
+	for line := range strings.SplitSeq(sec["memory"], "\n") {
 		name, value, _ := strings.Cut(line, ":")
 		kb := count(strings.TrimSuffix(strings.TrimSpace(value), " kB"))
 
@@ -130,7 +130,7 @@ func ParseMachine(out string) (Machine, error) {
 func parseDisks(raw string) []Disk {
 	var disks []Disk
 
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		f := strings.Fields(line)
 		if len(f) < 6 || !strings.HasSuffix(f[4], "%") {
 			continue
@@ -155,14 +155,14 @@ func parseTop(raw string) (busy float64, procs []Process) {
 	busy = -1
 	header := false
 
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		f := strings.Fields(line)
 
 		switch {
 		case strings.HasPrefix(line, "%Cpu"):
 			_, values, _ := strings.Cut(line, ":")
 
-			for _, v := range strings.Split(values, ",") {
+			for v := range strings.SplitSeq(values, ",") {
 				if n, name, _ := strings.Cut(strings.TrimSpace(v), " "); name == "id" {
 					busy = 100 - number(n)
 				}
@@ -229,7 +229,7 @@ func ParseUnit(out string) (UnitInfo, error) {
 		u.Memory -= min(count(f[1]), u.Memory)
 	}
 
-	for _, line := range strings.Split(strings.TrimSpace(sec["journal"]), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(sec["journal"]), "\n") {
 		if line != "" {
 			u.Journal = append(u.Journal, line)
 		}
@@ -289,7 +289,7 @@ func ParseStack(out string) (StackInfo, error) {
 
 	stats := map[string]*Stats{}
 
-	for _, line := range strings.Split(sec["stats"], "\n") {
+	for line := range strings.SplitSeq(sec["stats"], "\n") {
 		if f := strings.Split(line, "\t"); len(f) == 4 {
 			stats[f[0]] = &Stats{CPU: percent(f[1]), Mem: percent(f[2]), MemUsage: f[3]}
 		}
@@ -297,7 +297,7 @@ func ParseStack(out string) (StackInfo, error) {
 
 	s := StackInfo{CPUs: int(count(sec["cpus"]))}
 
-	for _, line := range strings.Split(ps, "\n") {
+	for line := range strings.SplitSeq(ps, "\n") {
 		f := strings.Split(line, "\t")
 		if len(f) != 5 {
 			continue
@@ -368,7 +368,7 @@ type inspected struct {
 		RestartPolicy struct{ Name string }
 	}
 	NetworkSettings struct {
-		Ports    map[string][]struct{ HostIp, HostPort string }
+		Ports    map[string][]struct{ HostIP, HostPort string }
 		Networks map[string]struct{ IPAddress string }
 	}
 	Mounts []struct {
@@ -409,7 +409,7 @@ func ParseContainer(out string) (ContainerInfo, error) {
 		}
 
 		for _, b := range bindings {
-			c.Ports = append(c.Ports, net.JoinHostPort(b.HostIp, b.HostPort)+" → "+port) // [::]:80 for IPv6
+			c.Ports = append(c.Ports, net.JoinHostPort(b.HostIP, b.HostPort)+" → "+port) // [::]:80 for IPv6
 		}
 	}
 

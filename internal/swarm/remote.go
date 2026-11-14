@@ -143,7 +143,7 @@ func streamLines(ctx context.Context, h Host, tty bool, remote string) <-chan st
 
 	go func() {
 		if err := cmd.Run(); err != nil && ctx.Err() == nil && !errors.Is(err, exec.ErrWaitDelay) {
-			fmt.Fprintf(pw, "[%v]\n", err)
+			_, _ = fmt.Fprintf(pw, "[%v]\n", err) // the reader may be gone: no one left to tell
 		}
 
 		pw.Close()

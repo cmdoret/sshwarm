@@ -29,18 +29,14 @@ func ProbeAll(ctx context.Context, hosts []Host, timeout time.Duration) []Report
 	var wg sync.WaitGroup
 
 	for i, h := range hosts {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			out, err := RunProbe(ctx, h, timeout)
 			if err == nil {
 				reports[i], err = Parse(out)
 			}
 
 			reports[i].Host, reports[i].Err = h, err
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -151,7 +147,7 @@ func sections(out string) map[string]string {
 func parseUnits(raw string) []Unit {
 	var units []Unit
 
-	for _, block := range strings.Split(raw, "\n\n") {
+	for block := range strings.SplitSeq(raw, "\n\n") {
 		p := keyValues(block)
 		if p["Id"] == "" {
 			continue
@@ -176,7 +172,7 @@ func withUnloaded(units []Unit, raw string) []Unit {
 		loaded[u.Name] = true
 	}
 
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 || loaded[f[0]] || strings.HasSuffix(f[0], "@.service") || f[1] == "alias" {
 			continue
@@ -193,7 +189,7 @@ func withUnloaded(units []Unit, raw string) []Unit {
 func parseStacks(raw string, since map[string]time.Time) []Stack {
 	byName := map[string][]Container{}
 
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		if f := strings.Split(line, "\t"); len(f) == 4 && f[0] != "" {
 			byName[f[0]] = append(byName[f[0]], Container{Name: f[1], State: f[2], Status: f[3], Since: since[f[1]]})
 		}
@@ -213,7 +209,7 @@ func parseStacks(raw string, since map[string]time.Time) []Stack {
 func parseTimes(raw string) map[string]time.Time {
 	since := map[string]time.Time{}
 
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		f := strings.Fields(line)
 		if len(f) != 3 {
 			continue
@@ -240,7 +236,7 @@ func parseTimes(raw string) map[string]time.Time {
 func keyValues(s string) map[string]string {
 	kv := map[string]string{}
 
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if k, v, ok := strings.Cut(line, "="); ok {
 			kv[k] = v
 		}
