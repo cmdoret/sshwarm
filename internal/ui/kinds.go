@@ -14,7 +14,7 @@ import (
 )
 
 // kind is a resource the tables list: its names, columns and rows, and what enter,
-// l, d and s do on a row, found by its key.
+// l, d, s and the action keys do on a row, found by its key.
 type kind struct {
 	names  []string // the first is the tab's name; all of them work in the command bar
 	help   string   // its own keys, for the help line
@@ -28,7 +28,33 @@ type kind struct {
 	describe func(r swarm.Report, key string) (title, cmd string) // nil: nothing to describe
 	card     cardFunc                                             // draws describe's output
 	shell    func(r swarm.Report, key string) (remote string)     // "": a login shell; nil: no shell
+
+	// act fills in what a, from actionKeys, does to the row about key: what it acts
+	// on, and the command. It's not ok if the kind has no such action.
+	act        func(r swarm.Report, a action, key string) (action, bool)
+	actionHelp string // the keys of act's actions and of the shell, for the help line
 }
+
+// action is a start, stop or restart (or reboot) of what a row is about: asked for
+// with its key, then confirmed, then run.
+type action struct {
+	verb, done string // "restart", "restarted"
+	what, cmd  string // once asked: "stack immich on web-1", and the command that does it
+	host       swarm.Host
+}
+
+// actionKeys start, stop and restart what's under the cursor, if its kind can (act).
+var actionKeys = map[string]action{
+	"u":      {verb: "start", done: "started"}, // up
+	"ctrl+k": {verb: "stop", done: "stopped"},  // k9s's kill
+	"R":      {verb: "restart", done: "restarted"},
+}
+
+// rowActionHelp is the action keys of what runs on a machine, for the help line.
+const rowActionHelp = "u start · ^k stop · R restart"
+
+// on says where what is: on r's machine.
+func on(r swarm.Report, what string) string { return what + " on " + r.Host.Name }
 
 // kinds are the command bar's resources.
 var kinds = []*kind{machines, services, stacks, containers}
@@ -44,7 +70,7 @@ func kindNamed(name string) *kind {
 }
 
 // tabsOf lists a machine's kinds, in tab order: stacks and containers only if it has
-// some, so that a machine with docker but nothing in it looks like one without.
+// some.
 func tabsOf(r swarm.Report) []*kind {
 	if len(r.Stacks) > 0 {
 		return []*kind{services, stacks, containers}
@@ -58,7 +84,7 @@ func tabsOf(r swarm.Report) []*kind {
 // machines is the bottom table; a machine's own kinds are its tabs (tabsOf).
 var machines = &kind{
 	names:  []string{"machines"},
-	help:   "enter open · d describe · s ssh",
+	help:   "enter open · d describe",
 	titles: machineTitles,
 	status: 1,
 	age:    2, // DEPLOY: what changed last, as services' AGE
@@ -74,6 +100,14 @@ var machines = &kind{
 	shell:    func(swarm.Report, string) string { return "" },
 	describe: func(swarm.Report, string) (string, string) { return "describe", swarm.DescribeMachine() },
 	card:     machineCard,
+	act: func(r swarm.Report, a action, _ string) (action, bool) {
+		if a.verb != "restart" { // can't be started over ssh, nor started again once stopped
+			return action{}, false
+		}
+
+		return action{verb: "reboot", done: "rebooting", what: r.Host.Name, cmd: swarm.Reboot()}, true
+	},
+	actionHelp: "s ssh · R reboot",
 }
 
 // machineTitles head the machines table: `sshwarm status` prints all but PROBLEMS.
@@ -149,10 +183,16 @@ var services = &kind{
 		return "describe " + unit, swarm.DescribeUnit(unit)
 	},
 	card: unitCard,
+	act: func(r swarm.Report, a action, unit string) (action, bool) {
+		a.what, a.cmd = on(r, unit), swarm.UnitAction(a.verb, unit)
+
+		return a, true
+	},
+	actionHelp: rowActionHelp,
 }
 
-// serviceRows lists a machine's interesting units, failed first; with m.all, every
-// unit.
+// serviceRows lists a machine's interesting units, failed first, then by name
+// ignoring case, as column sorts do; with m.all, every unit.
 func serviceRows(m *model, host int, _ string) []row {
 	r := m.reports[host]
 
@@ -170,7 +210,7 @@ func serviceRows(m *model, host int, _ string) []row {
 			return fi
 		}
 
-		return units[i].Name < units[j].Name
+		return strings.ToLower(units[i].Name) < strings.ToLower(units[j].Name)
 	})
 
 	var rows []row
@@ -240,12 +280,18 @@ var stacks = &kind{
 		return "describe stack " + stack, swarm.DescribeStack(r.Docker, stack)
 	},
 	card: stackCard,
+	act: func(r swarm.Report, a action, stack string) (action, bool) {
+		a.what, a.cmd = on(r, "stack "+stack), swarm.StackAction(r.Docker, a.verb, stack)
+
+		return a, true
+	},
+	actionHelp: rowActionHelp,
 }
 
 // containers lists a machine's compose containers, or one stack's.
 var containers = &kind{
 	names:  []string{"containers", "ctr"},
-	help:   "enter logs · d describe · s shell · J stack",
+	help:   "enter logs · d describe · J stack",
 	titles: []string{"CONTAINER", "STACK", "STATE", "AGE", "STATUS"},
 	status: 2,
 	age:    3, // the time since it last started or stopped, as services' AGE
@@ -274,6 +320,12 @@ var containers = &kind{
 	},
 	card:  containerCard,
 	shell: func(r swarm.Report, name string) string { return swarm.ContainerShell(r.Docker, name) },
+	act: func(r swarm.Report, a action, name string) (action, bool) {
+		a.what, a.cmd = on(r, "container "+name), swarm.ContainerAction(r.Docker, a.verb, name)
+
+		return a, true
+	},
+	actionHelp: "s shell · " + rowActionHelp,
 }
 
 func stackRow(r swarm.Report, s swarm.Stack) row {

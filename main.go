@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,9 +34,9 @@ var version, commit string
 
 // options are the global flags, given before the command.
 type options struct {
-	hosts, flake     string
-	timeout, refresh time.Duration
-	version          bool
+	hosts, flake      string
+	timeout, refresh  time.Duration
+	version, readOnly bool
 }
 
 func main() {
@@ -71,10 +72,21 @@ func parseGlobal(args []string) (options, []string, error) {
 	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "")
 	fs.DurationVar(&opts.refresh, "refresh", defaultRefresh, "")
 	fs.BoolVar(&opts.version, "version", false, "")
+	fs.BoolVar(&opts.readOnly, "read-only", envOn("SSHWARM_READ_ONLY"), "")
 
 	err := fs.Parse(args)
 
 	return opts, fs.Args(), err
+}
+
+// envOn says whether the environment variable name turns something on: set, but not
+// to a false value like 0 or false. Any other value is on, so that a typo errs on
+// the safe side.
+func envOn(name string) bool {
+	v := os.Getenv(name)
+	on, err := strconv.ParseBool(v)
+
+	return v != "" && (on || err != nil)
 }
 
 // run runs the command first in args, with its own flags and arguments after it.
@@ -92,7 +104,7 @@ func run(opts options, args []string) error {
 			return err
 		}
 
-		return ui.Run(hosts, opts.timeout, opts.refresh)
+		return ui.Run(hosts, opts.timeout, opts.refresh, opts.readOnly)
 	}
 
 	switch args[0] {
@@ -198,6 +210,7 @@ Flags, before the command:
   --flake <dir>          without --hosts, the flake defining deploy.nodes (default: $SSHWARM_FLAKE, or .)
   --timeout <duration>   probe timeout, per machine (default: %v)
   --refresh <duration>   how often the browser refreshes (default: %v)
+  --read-only            don't start, stop, restart or reboot anything, nor open shells (default: $SSHWARM_READ_ONLY set, but to 0 or false)
   --version              print the version and the commit it was built from
 
 Hosts file, one [[host]] per machine. ssh looks up its host, or else its name, in

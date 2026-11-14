@@ -1,5 +1,5 @@
 // Package swarm talks to the machines over ssh: it lists them, probes them, streams
-// their logs and descriptions, and opens shells.
+// their logs and descriptions, opens shells and runs actions.
 package swarm
 
 import (
@@ -55,7 +55,7 @@ func RunProbe(ctx context.Context, h Host, timeout time.Duration) (string, error
 	defer cancel()
 
 	// The probe stops on its own on the host, a bit before we give up: without a
-	// terminal, killing ssh wouldn't stop a command stuck there (a hung docker ps).
+	// terminal, killing ssh wouldn't stop a command stuck there.
 	onHost := max(int(timeout.Seconds())-2, 1)
 	cmd := sshCmd(ctx, h, false, fmt.Sprintf("timeout %d bash -s", onHost))
 	cmd.Stdin = strings.NewReader(probeScript)
@@ -116,7 +116,7 @@ func Parse(out string) (Report, error) {
 		Memory:        usage(kv["memory"]),
 		Disk:          usage(kv["disk"]),
 		Docker:        kv["docker"],
-		Units:         parseUnits(sec["units"]),
+		Units:         withUnloaded(parseUnits(sec["units"]), sec["unit-files"]),
 		Stacks:        parseStacks(sec["containers"], parseTimes(sec["times"])),
 	}
 
@@ -162,6 +162,27 @@ func parseUnits(raw string) []Unit {
 			Result: p["Result"], UnitFileState: p["UnitFileState"],
 			Since: unix(strings.TrimPrefix(p["StateChangeTimestamp"], "@")),
 		})
+	}
+
+	return units
+}
+
+// withUnloaded adds to units the installed units systemd hasn't loaded, from
+// systemctl list-unit-files (name, then state, per line): inactive. Templates
+// (foo@.service) and aliases aren't units of their own.
+func withUnloaded(units []Unit, raw string) []Unit {
+	loaded := map[string]bool{}
+	for _, u := range units {
+		loaded[u.Name] = true
+	}
+
+	for _, line := range strings.Split(raw, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 || loaded[f[0]] || strings.HasSuffix(f[0], "@.service") || f[1] == "alias" {
+			continue
+		}
+
+		units = append(units, Unit{Name: f[0], Active: "inactive", Sub: "dead", UnitFileState: f[1]})
 	}
 
 	return units

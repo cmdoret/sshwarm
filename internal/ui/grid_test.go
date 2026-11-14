@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -61,6 +62,21 @@ func TestTones(t *testing.T) {
 	starting := swarm.Stack{Name: "s", Containers: []swarm.Container{{State: "running", Status: "Up 3 seconds (health: starting)"}}}
 	if s := stackRow(r, starting); s.tone != inherit || s.cells[0].tone != warn {
 		t.Errorf("starting stack: %+v", s)
+	}
+}
+
+// Units list failed first, then by name ignoring case.
+func TestServiceOrder(t *testing.T) {
+	units := []swarm.Unit{{Name: "zed.service"}, {Name: "NetworkManager.service"}, {Name: "avahi.service"}, {Name: "x.service", Active: "failed"}}
+	m := &model{all: true, reports: []swarm.Report{{Units: units}}}
+
+	var got []string
+	for _, r := range serviceRows(m, 0, "") {
+		got = append(got, r.key)
+	}
+
+	if want := []string{"x.service", "avahi.service", "NetworkManager.service", "zed.service"}; !slices.Equal(got, want) {
+		t.Errorf("order %q, want %q", got, want)
 	}
 }
 

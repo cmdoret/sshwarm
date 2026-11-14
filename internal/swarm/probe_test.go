@@ -87,6 +87,26 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// An installed unit that systemd unloaded, stopped with nothing referring to it, is
+// still a unit: inactive. Templates and aliases aren't.
+func TestUnloadedUnits(t *testing.T) {
+	r, err := Parse("### meta\nnow=1\n### units\nId=web.service\nActiveState=active\nUnitFileState=enabled\n" +
+		"### unit-files\nweb.service enabled enabled\nbackup.service enabled enabled\nfsck.service static\n" +
+		"getty@.service enabled enabled\ndbus-org.x.service alias -\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []Unit{
+		{Name: "web.service", Active: "active", UnitFileState: "enabled"},
+		{Name: "backup.service", Active: "inactive", Sub: "dead", UnitFileState: "enabled"},
+		{Name: "fsck.service", Active: "inactive", Sub: "dead", UnitFileState: "static"},
+	}
+	if !slices.Equal(r.Units, want) {
+		t.Errorf("units:\n%+v\nwant:\n%+v", r.Units, want)
+	}
+}
+
 // Elsewhere than NixOS, there is no deploy time or revision, and nothing's wrong.
 func TestParseNotNixOS(t *testing.T) {
 	raw, err := os.ReadFile("testdata/debian.probe")
@@ -168,6 +188,35 @@ func TestDockerCmd(t *testing.T) {
 		if r.Docker != tt.want {
 			t.Errorf("docker answering %s: got %q, want %q", tt.answers, r.Docker, tt.want)
 		}
+	}
+}
+
+// A unit's action runs systemctl directly as root, else through sudo, and only once
+// when it fails.
+func TestUnitAction(t *testing.T) {
+	fakeBin(t, "id", `echo "$FAKE_UID"`)
+	fakeBin(t, "sudo", `shift; printf 'sudo '; exec "$@"`) // sudo -n …
+	fakeBin(t, "systemctl", `echo "systemctl $*"; exit 1`)
+
+	for uid, want := range map[string]string{"0": "systemctl --no-block restart it's", "1000": "sudo systemctl --no-block restart it's"} {
+		t.Setenv("FAKE_UID", uid)
+
+		out, err := exec.CommandContext(t.Context(), "bash", "-c", UnitAction("restart", "it's")).CombinedOutput()
+		if err == nil || strings.TrimSpace(string(out)) != want {
+			t.Errorf("uid %s: %v, ran %q, want %q once", uid, err, out, want)
+		}
+	}
+}
+
+// A reboot is a timer's, a moment later, running systemctl by its full path.
+func TestReboot(t *testing.T) {
+	fakeBin(t, "id", "echo 0")
+	fakeBin(t, "systemctl", "")
+	fakeBin(t, "systemd-run", `echo "$@"`)
+
+	out, err := exec.CommandContext(t.Context(), "bash", "-c", Reboot()).CombinedOutput()
+	if f := strings.Fields(string(out)); err != nil || len(f) != 4 || f[0] != "--on-active=2" || !strings.HasPrefix(f[2], "/") || f[3] != "reboot" {
+		t.Errorf("%v, ran systemd-run %s", err, out)
 	}
 }
 

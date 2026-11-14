@@ -72,6 +72,48 @@ func ContainerShell(docker, container string) string {
 		quote("command -v bash >/dev/null && exec bash || exec sh"))
 }
 
+// UnitAction is the command that starts, stops or restarts a systemd unit, for Run.
+func UnitAction(verb, unit string) string {
+	return asRoot("systemctl --no-block " + verb + " " + quote(unit))
+}
+
+// Reboot is the command that reboots a machine, for Run, 2 seconds later: once ssh
+// has ended. systemctl by its full path, which systemd's own may lack (NixOS).
+func Reboot() string {
+	return asRoot(`systemd-run --on-active=2 --timer-property=AccuracySec=1s "$(command -v systemctl)" reboot`)
+}
+
+// asRoot is cmd, run as root: directly if the user is root, else through sudo, which
+// mustn't ask for a password, as there's no terminal to ask on. In sh, whatever the
+// user's shell.
+func asRoot(cmd string) string {
+	return "sh -c " + quote(`if [ "$(id -u)" = 0 ]; then `+cmd+"; else sudo -n "+cmd+"; fi")
+}
+
+// StackAction is the command that starts, stops or restarts a compose stack's
+// containers, for Run. docker: see StackLogs.
+func StackAction(docker, verb, stack string) string {
+	return fmt.Sprintf("%s compose -p %s %s", docker, quote(stack), verb)
+}
+
+// ContainerAction is the command that starts, stops or restarts a container, for
+// Run. docker: see StackLogs.
+func ContainerAction(docker, verb, container string) string {
+	return fmt.Sprintf("%s %s %s", docker, verb, quote(container))
+}
+
+// Run runs cmd on h to its end, without a time limit, and returns its output, stdout
+// and stderr, without control characters. Without a terminal, cmd goes on on the
+// host if ssh is killed.
+func Run(ctx context.Context, h Host, cmd string) (string, error) {
+	out, err := sshCmd(ctx, h, false, cmd).CombinedOutput()
+	if errors.Is(err, exec.ErrWaitDelay) { // see sshCmd: ssh itself is done
+		err = nil
+	}
+
+	return clean(string(out)), err
+}
+
 // Interactive is ssh running remote on h with the user's terminal, or with remote
 // "", a login shell. The caller hands it the terminal.
 func Interactive(ctx context.Context, h Host, remote string) *exec.Cmd {
