@@ -2,10 +2,11 @@
 
 use lib/log.nu *
 use lib/viz.nu *
-  
+ 
+# Updates the vendor-hash in a text file based on nix build output.
 export def "main update-hash" [
-  flake_dir: string
-  hash_file: string
+  flake_dir: string # Directory containing the nix flake to build
+  hash_file: string # File storing the hash, must exist.
 ] {
   
   let spinner_id = job spawn { spinner  "Calculating hash..." }
@@ -26,5 +27,8 @@ export def "main update-hash" [
   }
   log error $res.stderr
 }
-
+#
+# Nix helper commands.
+#
+# Run `nix.nu <subcommand> --help` for details on each subcommand.
 def main [] {}

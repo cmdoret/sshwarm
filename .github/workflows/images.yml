@@ -1,0 +1,40 @@
+---
+name: Images
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  release:
+    types: [published]
+jobs:
+  images:
+    name: Build images, push a release's
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # to push to ghcr.io
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Build images
+        run: nix develop .#ci --command just image::build
+
+      - name: Log in to ghcr.io
+        if: github.event_name == 'release'
+        run: echo "$TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+        env:
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ github.token }}
+
+      # Tag v1.2.0 pushes 1.2.0, and latest unless it's a pre-release.
+      - name: Push images
+        if: github.event_name == 'release'
+        run: nix develop .#ci --command just image::push "${TAG#v}" $LATEST
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          LATEST: ${{ !github.event.release.prerelease && 'latest' || '' }}
