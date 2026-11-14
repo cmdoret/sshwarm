@@ -11,8 +11,8 @@ import (
 	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
-// A card is a description made readable, like k9s's: headed sections of aligned
-// fields, tables, and bars for what's used. Each kind's card parses its describe
+// A card is a human-readable description with values rendered into fields,
+// tables, and bars for what's used. Each kind's card parses its describe
 // command's output with swarm, and draws it whole: lines wider than the window
 // scroll left and right. On an error, the text screen shows the output as it came
 // instead.
