@@ -172,7 +172,7 @@ func (t *table) view(m *model) string {
 	}
 
 	help := t.kind.help
-	if t.grid.overflow() > 0 {
+	if t.grid.hidden() > 0 {
 		help += " · ←→ scroll"
 	}
 

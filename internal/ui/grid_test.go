@@ -88,44 +88,46 @@ func TestGridRender(t *testing.T) {
 	}
 }
 
-// A narrow grid scrolls its columns under the first, every line as wide as the grid,
-// with "…" where more follows; a wide one doesn't.
+// A narrow grid scrolls whole columns under the first, every line as wide as the
+// grid, with "…" where more follows; a wide one doesn't scroll.
 func TestGridScroll(t *testing.T) {
 	r := fixture(t)
 	g := grid{titles: machineTitles}
 	g.width, g.height = 60, 2 // the header and the row
 	g.setRows([]row{machineRow(r)})
 
-	right := tea.KeyMsg{Type: tea.KeyRight}
-	for range 20 { // past the end, which stops it
-		lines := strings.Split(g.view(), "\n")
-		for i, l := range lines {
-			if w := lipgloss.Width(l); w != g.width || !strings.Contains(l, []string{"MACHINE", "app-node-argiope"}[i]) {
-				t.Fatalf("scrolled %d, line %d is %d wide or lost its first column: %q", g.left, i, w, l)
-			}
+	for range len(machineTitles) { // past the end, which stops it
+		head, line, _ := strings.Cut(g.view(), "\n")
+		if lipgloss.Width(head) != g.width || lipgloss.Width(line) != g.width || !strings.Contains(line, "app-node-argiope") {
+			t.Fatalf("scrolled %d: lines not %d wide, or the first column lost:\n%s\n%s", g.scroll, g.width, head, line)
 		}
 
-		if more := strings.HasSuffix(strings.TrimSpace(lines[1]), "…"); more != (g.left < g.overflow()) {
-			t.Fatalf("scrolled %d of %d: %q", g.left, g.overflow(), lines[1])
+		// The first column shown after MACHINE is whole: its title starts it.
+		if shown := strings.TrimLeft(strings.TrimPrefix(head, " MACHINE"), " "); !strings.HasPrefix(shown, machineTitles[1+g.scroll]) {
+			t.Fatalf("scrolled %d, the header shows %q", g.scroll, shown)
 		}
 
-		g.key(right)
+		if g.scroll < g.hidden() && !strings.HasSuffix(head, "…") {
+			t.Fatalf("scrolled %d of %d, no … for the columns hidden: %q", g.scroll, g.hidden(), head)
+		}
+
+		g.key(tea.KeyMsg{Type: tea.KeyRight})
 	}
 
-	if !strings.Contains(g.view(), "(Up 2 hours (unhealthy))") {
-		t.Errorf("the end of the problems isn't shown at the end:\n%s", g.view())
+	if g.scroll != len(machineTitles)-2 { // the problems are long: they end up alone after MACHINE
+		t.Errorf("scrolled %d at the end", g.scroll)
 	}
 
-	for range 20 {
+	for range len(machineTitles) {
 		g.key(tea.KeyMsg{Type: tea.KeyLeft})
 	}
 
-	if g.left != 0 {
-		t.Errorf("scrolled back to %d", g.left)
+	if g.scroll != 0 {
+		t.Errorf("scrolled back to %d", g.scroll)
 	}
 
 	g.width = 1000
-	if g.clamp(); g.overflow() != 0 || g.left != 0 {
-		t.Errorf("a wide grid scrolls: overflow %d, left %d", g.overflow(), g.left)
+	if g.clamp(); g.hidden() != 0 || g.scroll != 0 {
+		t.Errorf("a wide grid scrolls: %d columns hidden, %d scrolled", g.hidden(), g.scroll)
 	}
 }

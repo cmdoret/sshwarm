@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -63,7 +62,7 @@ type grid struct {
 	titles         []string
 	rows           []row
 	cursor, offset int
-	left           int // how far the columns after the first are scrolled
+	scroll         int // how many columns after the first are scrolled out of view
 	width, height  int // the space it has, header included
 }
 
@@ -80,53 +79,26 @@ func (g grid) visible() int { return max(g.height-1, 1) }
 func (g *grid) clamp() {
 	g.cursor = min(max(g.cursor, 0), max(len(g.rows)-1, 0))
 	g.offset = min(max(g.offset, g.cursor-g.visible()+1), g.cursor)
-	g.left = min(max(g.left, 0), g.overflow())
+	g.scroll = min(max(g.scroll, 0), g.hidden())
 }
 
-// overflow is how much wider than the grid its columns are: how far they scroll.
-func (g grid) overflow() int {
-	total := 0
-	for _, w := range g.widths() {
-		total += w + 2 // and its padding
+// hidden is how many columns after the first can scroll out of view: until the
+// others fit, or only the last one is left.
+func (g grid) hidden() int {
+	ws := g.widths()
+	room := g.width - (ws[0] + 2) // what the first column and its padding leave
+
+	rest := 0
+	for _, w := range ws[1:] {
+		rest += w + 2
 	}
 
-	return max(total-g.width, 0)
-}
-
-// stops are where the columns after the first scroll to: each one's start, so that
-// none shows cut on the left, then half the grid at a time through the last one,
-// which may be long, up to the end.
-func (g grid) stops() []int {
-	ws, end := g.widths(), g.overflow()
-	stops := []int{0}
-
-	x := 0
-	for _, w := range ws[1 : len(ws)-1] {
-		x += w + 2
-		stops = append(stops, min(x, end))
+	n := 0
+	for ; rest > room && n < len(ws)-2; n++ {
+		rest -= ws[1+n] + 2
 	}
 
-	for x += max(g.width/2, 1); x < end; x += max(g.width/2, 1) {
-		stops = append(stops, x)
-	}
-
-	return append(stops, end)
-}
-
-// scroll moves the columns to the next stop, or the previous one.
-func (g *grid) scroll(next bool) {
-	stops := g.stops()
-
-	i, _ := slices.BinarySearch(stops, g.left) // the first stop at or past left
-	if next {
-		i, _ = slices.BinarySearch(stops, g.left+1)
-	} else {
-		i--
-	}
-
-	if i >= 0 && i < len(stops) {
-		g.left = stops[i]
-	}
+	return n
 }
 
 // key moves the cursor, or scrolls the columns.
@@ -150,8 +122,10 @@ func (g *grid) key(k tea.KeyMsg) {
 		g.cursor = 0
 	case "end", "G":
 		g.cursor = len(g.rows) - 1
-	case "left", "right":
-		g.scroll(k.String() == "right")
+	case "left":
+		g.scroll--
+	case "right":
+		g.scroll++
 	}
 
 	g.clamp()
@@ -222,10 +196,10 @@ func (g grid) view() string {
 	return b.String()
 }
 
-// scrolled joins a line's rendered cells: the first in place, the others scrolled
-// under it, and cut at the grid's edge with "…" where more follows.
+// scrolled joins a line's rendered cells: the first, then those not scrolled out of
+// view, cut at the grid's edge with "…" where more follows.
 func (g grid) scrolled(cells []string) string {
-	rest := ansi.TruncateLeft(strings.Join(cells[1:], ""), g.left, "")
+	rest := strings.Join(cells[1+g.scroll:], "")
 
 	return cells[0] + ansi.Truncate(rest, max(g.width-ansi.StringWidth(cells[0]), 0), "…")
 }
