@@ -70,11 +70,11 @@ echo "kernel=$(uname -r)"
 echo "arch=$(uname -m)"
 echo "virt=$(systemd-detect-virt 2>/dev/null)"
 echo "model=$(LC_ALL=C lscpu 2>/dev/null | sed -n 's/^Model name: *//p')"
-echo "cpus=$(nproc)"
+echo "cpus=$(getconf _NPROCESSORS_ONLN)"
 echo "uptime=$(cut -d' ' -f1 /proc/uptime)"
 echo "load=$(cut -d' ' -f1-3 /proc/loadavg)"`},
 		[2]string{"memory", "grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo"},
-		[2]string{"disks", "df -P -k -x tmpfs -x devtmpfs -x overlay -x squashfs"},
+		[2]string{"disks", "df -P -k -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs"},
 		[2]string{"top", "HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent LC_ALL=C top -b -n 2 -d 1 -w 512 | awk '/^top -/ {n++} n == 2' | head -n 12"},
 	)
 }
@@ -270,7 +270,7 @@ func projectFilter(stack string) string {
 // container to name, docker stats would list every container: they're named.
 func DescribeStack(docker, stack string) string {
 	return inSections(
-		[2]string{"cpus", "nproc"},
+		[2]string{"cpus", "getconf _NPROCESSORS_ONLN"},
 		[2]string{"ps", docker + " ps -a " + projectFilter(stack) +
 			` --format '{{.Names}}\t{{.Label "com.docker.compose.service"}}\t{{.State}}\t{{.Status}}\t{{.Ports}}'`},
 		[2]string{"stats", "ids=$(" + docker + " ps -q " + projectFilter(stack) + `); [ -z "$ids" ] || ` +
@@ -337,7 +337,7 @@ type ContainerInfo struct {
 // what it uses, then everything docker knows about it. docker: see StackLogs.
 func DescribeContainer(docker, container string) string {
 	return inSections(
-		[2]string{"cpus", "nproc"},
+		[2]string{"cpus", "getconf _NPROCESSORS_ONLN"},
 		[2]string{"stats", docker + ` stats --no-stream --format '{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}' ` + quote(container)},
 		[2]string{"inspect", docker + " inspect " + quote(container)},
 	)
