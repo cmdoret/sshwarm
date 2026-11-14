@@ -66,7 +66,7 @@ func RunProbe(ctx context.Context, h inventory.Host, timeout time.Duration) (str
 	out := remote.Clean(string(raw))
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", errors.New("timed out")
+		return "", fmt.Errorf("timed out after %v", timeout)
 	}
 
 	if err == nil || errors.Is(err, exec.ErrWaitDelay) {

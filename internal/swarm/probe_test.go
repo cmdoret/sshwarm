@@ -237,7 +237,7 @@ cat testdata/argiope.probe
 		t.Errorf("down host: %v", r[1].Err)
 	}
 
-	if r[2].Err == nil || r[2].Err.Error() != "timed out" {
+	if r[2].Err == nil || r[2].Err.Error() != "timed out after 1s" {
 		t.Errorf("slow host: %v", r[2].Err)
 	}
 
