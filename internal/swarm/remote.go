@@ -72,6 +72,41 @@ func ContainerShell(docker, container string) string {
 		quote("command -v bash >/dev/null && exec bash || exec sh"))
 }
 
+// UnitAction is the command that starts, stops or restarts a systemd unit,
+// for Run: as root, directly, as sudo may not be installed; else through sudo,
+// which mustn't ask for a password: without a terminal, systemctl can't ask either.
+// Never both: a unit that fails to restart would restart twice. In sh, whatever the
+// user's shell.
+func UnitAction(verb, unit string) string {
+	systemctl := "systemctl " + verb + " " + quote(unit)
+
+	return "sh -c " + quote(`if [ "$(id -u)" = 0 ]; then `+systemctl+"; else sudo -n "+systemctl+"; fi")
+}
+
+// StackAction is the command that starts, stops or restarts (verb) a compose
+// stack's containers, for Run. docker: see StackLogs.
+func StackAction(docker, verb, stack string) string {
+	return fmt.Sprintf("%s compose -p %s %s", docker, quote(stack), verb)
+}
+
+// ContainerAction is the command that starts, stops or restarts (verb) a container,
+// for Run. docker: see StackLogs.
+func ContainerAction(docker, verb, container string) string {
+	return fmt.Sprintf("%s %s %s", docker, verb, quote(container))
+}
+
+// Run runs cmd on h to its end, and returns its output, stdout and stderr, without
+// control characters. Unlike Stream, it sets no time limit, which could cut an
+// action half-way; and without a terminal, cmd goes on on the host if ssh is killed.
+func Run(ctx context.Context, h Host, cmd string) (string, error) {
+	out, err := sshCmd(ctx, h, false, cmd).CombinedOutput()
+	if errors.Is(err, exec.ErrWaitDelay) { // see sshCmd: ssh itself is done
+		err = nil
+	}
+
+	return clean(string(out)), err
+}
+
 // Interactive is ssh running remote on h with the user's terminal, or with remote
 // "", a login shell. The caller hands it the terminal.
 func Interactive(ctx context.Context, h Host, remote string) *exec.Cmd {

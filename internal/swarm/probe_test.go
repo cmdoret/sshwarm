@@ -171,6 +171,23 @@ func TestDockerCmd(t *testing.T) {
 	}
 }
 
+// A unit's action runs systemctl directly as root, else through sudo, and only once
+// when it fails.
+func TestUnitAction(t *testing.T) {
+	fakeBin(t, "id", `echo "$FAKE_UID"`)
+	fakeBin(t, "sudo", `shift; printf 'sudo '; exec "$@"`) // sudo -n …
+	fakeBin(t, "systemctl", `echo "systemctl $*"; exit 1`)
+
+	for uid, want := range map[string]string{"0": "systemctl restart it's", "1000": "sudo systemctl restart it's"} {
+		t.Setenv("FAKE_UID", uid)
+
+		out, err := exec.CommandContext(t.Context(), "bash", "-c", UnitAction("restart", "it's")).CombinedOutput()
+		if err == nil || strings.TrimSpace(string(out)) != want {
+			t.Errorf("uid %s: %v, ran %q, want %q once", uid, err, out, want)
+		}
+	}
+}
+
 func TestSSHCmd(t *testing.T) {
 	args := sshCmd(t.Context(), Host{Address: "-oProxyCommand=x", Opts: []string{"-p", "2222"}}, true, "uptime").Args
 	n := len(args)
