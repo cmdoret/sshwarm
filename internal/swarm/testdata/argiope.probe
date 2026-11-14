@@ -5,6 +5,9 @@ uptime=90061.52
 deployed=1794292800
 revision=0123456789abcdef0123456789abcdef01234567-dirty
 reboot=true
+cpu=12.5
+memory=74.2
+disk=93.1
 docker=sudo -n docker
 ### units
 Id=compose-immich.service
