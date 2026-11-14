@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/cmdoret/sshwarm/internal/inventory"
 	"github.com/cmdoret/sshwarm/internal/swarm"
 	"github.com/cmdoret/sshwarm/internal/testutil"
 )
@@ -27,7 +28,7 @@ type session struct {
 func start(t *testing.T, reports ...swarm.Report) *session {
 	t.Helper()
 
-	var hosts []swarm.Host
+	var hosts []inventory.Host
 	for _, r := range reports {
 		hosts = append(hosts, r.Host)
 	}
@@ -129,10 +130,21 @@ func (s *session) ran(want ...string) {
 // of its structure changes them, not every test.
 
 // model is the TUI's state.
-func (s *session) model() model { return s.m.(model) }
+func (s *session) model() *model { return s.m.(*model) }
 
-// table is the table screen on top.
-func (s *session) table() *table { return s.model().top().(*table) }
+// list is the list on top: the fleet's, or a machine's.
+func (s *session) list() *list {
+	switch top := s.model().top().(type) {
+	case *fleet:
+		return &top.list
+	case *host:
+		return &top.list
+	}
+
+	s.t.Fatalf("no list on top: %T", s.model().top())
+
+	return nil
+}
 
 // text is the text screen on top: logs or a description.
 func (s *session) text() *text { return s.model().top().(*text) }
@@ -140,7 +152,7 @@ func (s *session) text() *text { return s.model().top().(*text) }
 // rows lists the keys of the top table's rows, in order.
 func (s *session) rows() []string {
 	var keys []string
-	for _, r := range s.table().grid.rows {
+	for _, r := range s.list().grid.rows {
 		keys = append(keys, r.key)
 	}
 
@@ -149,9 +161,9 @@ func (s *session) rows() []string {
 
 // selected is the key of the top table's row under the cursor.
 func (s *session) selected() string {
-	g := s.table().grid
+	key, _ := s.list().grid.selected()
 
-	return g.rows[g.cursor].key
+	return key
 }
 
 // depth is how many screens are open, the machines' included.
@@ -189,7 +201,7 @@ echo line-two
 `)
 
 	// Before the first probe, there is nothing to open: keys but q do nothing.
-	m := newModel(t.Context(), []swarm.Host{r.Host}, time.Second, time.Hour)
+	m := newModel(t.Context(), []inventory.Host{r.Host}, time.Second, time.Hour)
 	if v := m.View(); !strings.Contains(v, "probing 1 machines") {
 		t.Errorf("before the first probe: %q", v)
 	}
@@ -295,7 +307,7 @@ func TestNavigation(t *testing.T) {
 	// J: from immich_server to its stack, in the stacks tab, even filtered out.
 	s.keys("/", "server", "enter", "J")
 
-	if tb := s.table(); tb.kind != stacks || s.selected() != "immich" || tb.filter.Value() != "" {
+	if tb := s.list(); tb.kind != stacks || s.selected() != "immich" || tb.filter.Value() != "" {
 		t.Errorf("J went to %s, on %s, filtered %q", tb.kind.names[0], s.selected(), tb.filter.Value())
 	}
 
@@ -378,10 +390,10 @@ func TestTabs(t *testing.T) {
 func TestSort(t *testing.T) {
 	r := fixture(t)
 	idle := r
-	idle.Host = swarm.Host{Name: "Idle"}
+	idle.Host = inventory.Host{Name: "Idle"}
 	idle.Units, idle.Stacks, idle.Disk = nil, nil, 12
 
-	down := swarm.Report{Host: swarm.Host{Name: "down"}, Err: errTest}
+	down := swarm.Report{Host: inventory.Host{Name: "down"}, Err: errTest}
 
 	s := start(t, idle, r, down)
 	s.expect("⇧←→ column • O sort")
@@ -467,7 +479,7 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 
 		s.m, cmd = s.m.Update(msg)
 
-		if m := s.model(); m.running != 0 || cmd == nil && !m.again {
+		if m := s.model(); m.running != 0 || cmd == nil && !m.probes.again {
 			t.Errorf("%s: still running, or no refresh after it", key)
 		}
 	}
@@ -504,12 +516,12 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 	// The probe running when it ended may have looked before: another follows.
 	s.m, _ = s.m.Update(reportsMsg{r})
 
-	if m := s.model(); !m.refreshing || m.again {
+	if m := s.model(); !m.probes.running || m.probes.again {
 		t.Error("no probe after the one running during the action")
 	}
 
 	// A tick during that probe doesn't queue another: its end sets the next tick.
-	if s.m, _ = s.m.Update(tickMsg(s.model().tickGen)); s.model().again {
+	if s.m, _ = s.m.Update(tickMsg(s.model().probes.gen)); s.model().probes.again {
 		t.Error("a tick during a probe queued another")
 	}
 
@@ -524,7 +536,7 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 	s.expect("started container cook-cookcli-1 on app-node-argiope")
 
 	ran, _ := os.ReadFile(runs)
-	if want := swarm.Reboot() + "\n" + swarm.UnitAction("restart", "broken.service") + "\nsudo -n docker compose -p 'cook' stop\nsudo -n docker start 'cook-cookcli-1'\n"; string(ran) != want {
+	if want := swarm.Reboot() + "\n" + swarm.UnitAction(swarm.Restart, "broken.service") + "\nsudo -n docker compose -p 'cook' stop\nsudo -n docker start 'cook-cookcli-1'\n"; string(ran) != want {
 		t.Errorf("ran:\n%s\nwant:\n%s", ran, want)
 	}
 
@@ -532,9 +544,7 @@ case "$remote" in *systemctl*) echo "sudo: a password is required"; exit 1 ;; es
 	s.keys("j")
 	s.expect("J stack • s shell • u start • ^k stop • R restart")
 
-	ro := s.model()
-	ro.readOnly = true
-	s.m = ro
+	s.model().readOnly = true
 
 	s.keys("R")
 	s.expect("read-only: no actions")
@@ -716,7 +726,7 @@ func TestCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := newText("describe", swarm.Host{}, "", containerCard)
+	c := newText("describe", inventory.Host{}, "", containerCard)
 	c.resize(80, 30)
 	c.lines = strings.Split(string(raw), "\n")
 	c.setContent()
