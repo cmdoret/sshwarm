@@ -1,5 +1,5 @@
 // sshwarm shows the state of Linux machines over ssh: uptime, pending reboots,
-// failed units, compose stacks, and their logs.
+// CPU, memory and disk use, failed units, compose stacks, and their logs.
 package main
 
 import (

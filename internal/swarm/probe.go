@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -111,6 +112,9 @@ func Parse(out string) (Report, error) {
 		Now:           unix(kv["now"]),
 		Deployed:      unix(kv["deployed"]),
 		RebootPending: kv["reboot"] == "true",
+		Load:          usage(kv["load"]),
+		Memory:        usage(kv["memory"]),
+		Disk:          usage(kv["disk"]),
 		Docker:        kv["docker"],
 		Units:         parseUnits(sec["units"]),
 		Stacks:        parseStacks(sec["containers"]),
@@ -193,6 +197,17 @@ func keyValues(s string) map[string]string {
 	}
 
 	return kv
+}
+
+// usage reads a percentage the probe computed; -1 when it couldn't, as 0% would
+// pass for a fine machine. Some awks print inf or nan for a division by zero.
+func usage(s string) float64 {
+	n, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || math.IsInf(n, 0) || math.IsNaN(n) {
+		return -1
+	}
+
+	return n
 }
 
 // unix reads seconds since the epoch; zero or anything else is the zero time.

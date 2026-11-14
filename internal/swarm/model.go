@@ -1,6 +1,7 @@
 package swarm
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -27,7 +28,10 @@ type Report struct {
 	Uptime        time.Duration
 	Deployed      time.Time // NixOS: the last deploy; zero elsewhere
 	RebootPending bool
-	Revision      string // NixOS: the git commit the system was built from, if set
+	Load          float64 // percent, -1 if unknown: the 1-minute load per CPU, past 100 when tasks wait
+	Memory        float64 // percent in use (not available to programs), -1 if unknown
+	Disk          float64 // percent used of the fullest local disk, -1 if unknown
+	Revision      string  // NixOS: the git commit the system was built from, if set
 	Units         []Unit
 	Docker        string // the command that reaches docker there, e.g. "sudo -n docker"; "" without docker
 	Stacks        []Stack
@@ -108,14 +112,21 @@ func (s Stack) Bad() []Container {
 	return out
 }
 
-// Problems lists what's wrong: the host is down, or failed commands, failed
-// units, containers not OK.
+// FullDisk is the use, in percent, from which the fullest disk is a problem.
+const FullDisk = 90
+
+// Problems lists what's wrong: the host is down, or failed commands, a disk nearly
+// full, failed units, containers not OK.
 func (r Report) Problems() []string {
 	if r.Err != nil {
 		return []string{"down: " + r.Err.Error()}
 	}
 
 	out := slices.Clone(r.Errors)
+
+	if r.Disk >= FullDisk {
+		out = append(out, fmt.Sprintf("disk %.0f%% full", r.Disk))
+	}
 
 	if failed := r.Failed(); len(failed) > 0 {
 		var names []string

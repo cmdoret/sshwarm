@@ -57,6 +57,15 @@ if rev=$(nixos-version --configuration-revision 2>/dev/null); then # NixOS, when
   echo "revision=$rev"
 fi
 echo "reboot=$(reboot_pending && echo true || echo false)"
+# Usage in percent. The 1-minute load per CPU, past 100 when tasks wait: getconf
+# counts the machine's CPUs, where nproc would obey OMP_NUM_THREADS.
+echo "load=$(awk -v cpus="$(getconf _NPROCESSORS_ONLN)" '{ print 100 * $1 / cpus }' /proc/loadavg)"
+# Memory in use: what isn't available to programs.
+echo "memory=$(awk '/^MemTotal:/ { total = $2 } /^MemAvailable:/ { free = $2 } END { print 100 * (total - free) / total }' /proc/meminfo)"
+# The fullest disk: local ones only, within 2s, as a hung mount would hang df and
+# time the whole probe out.
+echo "disk=$(timeout 2 df -P -l -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs 2>/dev/null |
+  awk 'NR > 1 && $3 + $4 > 0 { used = 100 * $3 / ($3 + $4); if (used > disk) disk = used } END { print disk }')"
 docker=$(docker_cmd)
 echo "docker=$docker"
 

@@ -72,7 +72,7 @@ var machines = &kind{
 }
 
 // machineTitles head the machines table: `sshwarm status` prints all but PROBLEMS.
-var machineTitles = []string{"MACHINE", "STATE", "DEPLOY", "UP", "REBOOT", "UNITS", "STACKS", "PROBLEMS"}
+var machineTitles = []string{"MACHINE", "STATE", "DEPLOY", "UP", "REBOOT", "UNITS", "STACKS", "LOAD", "MEM", "DISK", "PROBLEMS"}
 
 // machineRow is a machine's row, for both the TUI and `sshwarm status`. Only the
 // fields needing attention are colored, unless the machine is down.
@@ -128,6 +128,7 @@ func machineRow(r swarm.Report) row {
 
 	return row{key: r.Host.Name, cells: []cell{
 		{text: r.Host.Name}, state, deployed, {text: short(r.Uptime)}, reboot, units, stackCell,
+		usageCell(r.Load), usageCell(r.Memory), usageCell(r.Disk),
 		{text: strings.Join(problems, "; "), tone: bad},
 	}}
 }
@@ -327,6 +328,21 @@ func short(d time.Duration) string {
 	}
 
 	return strconv.Itoa(int(d.Hours()/24)) + "d"
+}
+
+// usageCell shows a percentage, in the describe card's colors (usageTone) but only
+// once it needs attention, as the table's other fields; "-" if unknown.
+func usageCell(percent float64) cell {
+	if percent < 0 {
+		return cell{text: "-"}
+	}
+
+	c := cell{text: fmt.Sprintf("%.0f%%", percent)}
+	if t := usageTone(percent / 100); t != good {
+		c.tone = t
+	}
+
+	return c
 }
 
 // shortRev keeps 7 characters of a commit, and its -dirty suffix.

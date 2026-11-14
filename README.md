@@ -12,7 +12,7 @@ Tired of ssh-ing into box after box to find out what's deployed where, which ser
 overnight and which container is crash-looping? **sshwarm** shows the whole swarm at a
 glance, with the logs of whatever is red a keypress away.
 
-- **Every machine, one table:** uptime, pending reboot, systemd units, compose stacks.
+- **Every machine, one table:** uptime, pending reboot, systemd units, compose stacks, system resources.
 - **Agentless:** a small bash probe over your own `ssh`, with your keys, agent and `~/.ssh/config`. Nothing to install on the machines.
 - **Scriptable:** `sshwarm status` prints the table and exits 1 when anything is wrong.
 
@@ -76,7 +76,7 @@ sshwarm --flake ./nix
 flowchart LR
     src["hosts.toml or flake.nix"] --> sw[sshwarm]
     sw -- "ssh, in parallel,<br>with ~/.ssh/config" --> m["each machine<br>runs probe.sh"]
-    m -- "OS, reboot,<br>units, stacks" --> sw
+    m -- "OS, reboot, usage,<br>units, stacks" --> sw
     sw --> ui["browser:<br>machines, services,<br>stacks, containers"]
     ui -. "logs, describe, shell,<br>on demand" .-> m
 ```

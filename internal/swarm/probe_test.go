@@ -51,6 +51,10 @@ func TestParse(t *testing.T) {
 		t.Errorf("deployed %v, uptime %v", r.Deployed, r.Uptime)
 	}
 
+	if r.Load != 12.5 || r.Memory != 74.2 || r.Disk != 93.1 {
+		t.Errorf("load %v, memory %v, disk %v", r.Load, r.Memory, r.Disk)
+	}
+
 	if r.Revision != "0123456789abcdef0123456789abcdef01234567-dirty" {
 		t.Errorf("rev = %s", r.Revision)
 	}
@@ -96,7 +100,7 @@ func TestParseNotNixOS(t *testing.T) {
 
 // A command that fails on the host is a problem, not a silent gap.
 func TestProbeErrors(t *testing.T) {
-	out := "### meta\nnow=1\ndocker=sudo -n docker\n" +
+	out := "### meta\nnow=1\ndocker=sudo -n docker\nload=+inf\nmemory=-nan\n" + // awk dividing by zero
 		"### error containers\nCannot connect to the Docker daemon\n" +
 		"### error units\nFailed to connect\n  to bus\n"
 
@@ -107,6 +111,10 @@ func TestProbeErrors(t *testing.T) {
 
 	if r.Docker == "" {
 		t.Error("docker that fails must still count as present")
+	}
+
+	if r.Load != -1 || r.Memory != -1 || r.Disk != -1 {
+		t.Errorf("usage not measured must be unknown, not 0%%: load %v, memory %v, disk %v", r.Load, r.Memory, r.Disk)
 	}
 
 	want := []string{"containers: Cannot connect to the Docker daemon", "units: Failed to connect to bus"}

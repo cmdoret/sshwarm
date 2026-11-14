@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -55,11 +56,13 @@ type row struct {
 }
 
 // grid is a scrolling table with one selected row. Unlike bubbles/table, it colors
-// cells without miscounting their width.
+// cells without miscounting their width. Columns too wide for it scroll sideways,
+// under the first one, which names the row.
 type grid struct {
 	titles         []string
 	rows           []row
 	cursor, offset int
+	scroll         int // how many columns after the first are scrolled out of view
 	width, height  int // the space it has, header included
 }
 
@@ -71,13 +74,34 @@ func (g *grid) setRows(rows []row) {
 // visible is the number of rows shown under the header.
 func (g grid) visible() int { return max(g.height-1, 1) }
 
-// clamp keeps the cursor on a row, and the view on the cursor.
+// clamp keeps the cursor on a row, the view on the cursor, and the columns from
+// scrolling past their end.
 func (g *grid) clamp() {
 	g.cursor = min(max(g.cursor, 0), max(len(g.rows)-1, 0))
 	g.offset = min(max(g.offset, g.cursor-g.visible()+1), g.cursor)
+	g.scroll = min(max(g.scroll, 0), g.hidden())
 }
 
-// key moves the cursor.
+// hidden is how many columns after the first can scroll out of view: until the
+// others fit, or only the last one is left.
+func (g grid) hidden() int {
+	ws := g.widths()
+	room := g.width - (ws[0] + 2) // what the first column and its padding leave
+
+	rest := 0
+	for _, w := range ws[1:] {
+		rest += w + 2
+	}
+
+	n := 0
+	for ; rest > room && n < len(ws)-2; n++ {
+		rest -= ws[1+n] + 2
+	}
+
+	return n
+}
+
+// key moves the cursor, or scrolls the columns.
 func (g *grid) key(k tea.KeyMsg) {
 	page := g.visible()
 
@@ -98,6 +122,10 @@ func (g *grid) key(k tea.KeyMsg) {
 		g.cursor = 0
 	case "end", "G":
 		g.cursor = len(g.rows) - 1
+	case "left":
+		g.scroll--
+	case "right":
+		g.scroll++
 	}
 
 	g.clamp()
@@ -125,27 +153,22 @@ func (g grid) natural() (ws []int, total int) {
 	return ws, total
 }
 
-// widths fits each column to its widest cell, the last taking the rest. If they
-// don't all fit, a column gets up to a third of the grid, so that one long name
-// can't push the others out.
+// widths fits each column to its widest cell, the last taking any room left. If
+// they don't all fit, a column but the last gets up to a third of the grid, so that
+// one long name can't push the others out; the rest then scrolls.
 func (g grid) widths() []int {
 	ws, total := g.natural()
 	last := len(ws) - 1
 
-	if total <= g.width {
-		ws[last] += g.width - total
-
-		return ws
+	if total > g.width {
+		for i := range ws[:last] {
+			total -= ws[i]
+			ws[i] = min(ws[i], max(g.width/3, 10))
+			total += ws[i]
+		}
 	}
 
-	rest := g.width - 2*len(ws) // every column's padding
-
-	for i := range ws[:last] {
-		ws[i] = min(ws[i], max(g.width/3, 10))
-		rest -= ws[i]
-	}
-
-	ws[last] = max(rest, 10)
+	ws[last] += max(g.width-total, 0)
 
 	return ws
 }
@@ -153,33 +176,41 @@ func (g grid) widths() []int {
 func (g grid) view() string {
 	ws := g.widths()
 
-	var head string
+	var head []string
 	for i, t := range g.titles {
-		head += pad(t, ws[i])
+		head = append(head, titleStyle.Render(pad(t, ws[i])))
 	}
 
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render(head))
+	b.WriteString(g.scrolled(head))
 
 	for i := g.offset; i < g.offset+g.visible(); i++ {
 		b.WriteString("\n")
 
 		if i < len(g.rows) {
-			b.WriteString(g.renderRow(i, ws))
+			b.WriteString(g.scrolled(g.renderRow(i, ws)))
 		}
 	}
 
 	return b.String()
 }
 
-// renderRow draws row i, a cell per column: in the cell's tone, or else the row's.
-// The selected row is a bold bar on a gray background, marked in the accent color
-// where its first cell's padding would be.
-func (g grid) renderRow(i int, widths []int) string {
+// scrolled joins a line's rendered cells: the first, then those not scrolled out of
+// view, cut at the grid's edge with "…" where more follows.
+func (g grid) scrolled(cells []string) string {
+	rest := strings.Join(cells[1+g.scroll:], "")
+
+	return cells[0] + ansi.Truncate(rest, max(g.width-ansi.StringWidth(cells[0]), 0), "…")
+}
+
+// renderRow draws row i's cells: in the cell's tone, or else the row's. The
+// selected row is a bold bar on a gray background, marked in the accent color where
+// its first cell's padding would be.
+func (g grid) renderRow(i int, widths []int) []string {
 	r := g.rows[i]
 
-	var out strings.Builder
+	var out []string
 
 	for j, c := range r.cells {
 		t := c.tone
@@ -192,15 +223,16 @@ func (g grid) renderRow(i int, widths []int) string {
 			st = st.Bold(true).Background(selection)
 		}
 
+		marker := ""
 		if i == g.cursor && j == 0 {
-			out.WriteString(keyStyle.Background(selection).Render("▌"))
+			marker = keyStyle.Background(selection).Render("▌")
 			text = text[1:] // the marker takes the padding's space
 		}
 
-		out.WriteString(st.Render(text))
+		out = append(out, marker+st.Render(text))
 	}
 
-	return out.String()
+	return out
 }
 
 // pad fits s in a column w wide, with a space either side.
