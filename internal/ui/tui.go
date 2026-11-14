@@ -308,6 +308,7 @@ func (m *model) goTo(command string) tea.Cmd {
 	}
 
 	m.popTo(1)
+	m.screens[0].(*table).grid.choose(m.hosts[host].Name) // so that esc goes back to it
 
 	return m.push(newTable(k, host, ""))
 }

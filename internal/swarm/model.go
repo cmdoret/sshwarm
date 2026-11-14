@@ -47,6 +47,7 @@ type Unit struct {
 // Container is one container of a compose stack.
 type Container struct {
 	Name, State, Status string
+	Since               time.Time // when it last started or stopped; zero if never, or unknown
 }
 
 // Stack is a compose project and its containers.
@@ -97,6 +98,20 @@ func (c Container) OK() bool {
 	}
 
 	return false
+}
+
+// Since is when anything in s last started or stopped: its youngest container's
+// Since, or the zero time.
+func (s Stack) Since() time.Time {
+	var last time.Time
+
+	for _, c := range s.Containers {
+		if c.Since.After(last) {
+			last = c.Since
+		}
+	}
+
+	return last
 }
 
 // Bad returns the containers that aren't OK.

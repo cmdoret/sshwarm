@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
 	"github.com/cmdoret/sshwarm/internal/swarm"
@@ -52,11 +53,12 @@ type text struct {
 	raw                bool      // shows a description's output as it came, not its card
 	follow, wrap, full bool      // full: no frame or help line
 	pager              viewport.Model
+	shown              string // what the pager shows, unwrapped; "" while loading: what c copies
 }
 
 func newText(title string, h swarm.Host, cmd string, card cardFunc) *text {
 	t := &text{title: title, host: h, cmd: cmd, card: card, wrap: true, pager: viewport.New(0, 0)}
-	t.pager.SetHorizontalStep(8) // left and right, once lines don't wrap
+	t.pager.SetHorizontalStep(8) // left and right, over a card or unwrapped lines
 
 	return t
 }
@@ -73,6 +75,7 @@ func (t *text) start(ctx context.Context, follow bool) tea.Cmd {
 	t.runs++
 
 	if !again {
+		t.shown = ""
 		t.pager.SetContent("loading…")
 	}
 
@@ -120,29 +123,26 @@ func (t *text) add(msg logLinesMsg) tea.Cmd {
 	return waitLog(t.ch)
 }
 
-// setContent draws a description's card once all its output is in, or else wraps
-// long lines to the window. Without wrapping, a card is as wide as its content, and
-// lines that are wider than the window scroll left and right.
+// setContent draws a description's card once all its output is in, or else shows
+// the output as it came, its long lines wrapped to the window unless wrapping is
+// off. Lines wider than the window, a card's or unwrapped, scroll left and right.
 func (t *text) setContent() {
-	content := strings.Join(t.lines, "\n")
+	if t.showsCard() && t.ch != nil {
+		return // still "loading…", or the last card: not the next one's partial output
+	}
+
+	t.shown = strings.Join(t.lines, "\n")
 
 	if t.showsCard() {
-		if t.ch != nil {
-			return // still "loading…"
-		}
-
-		width := t.pager.Width
-		if !t.wrap {
-			width = 0
-		}
-
-		if drawn, err := t.card(content, width); err == nil {
+		if drawn, err := t.card(t.shown); err == nil {
+			t.shown = drawn
 			t.pager.SetContent(drawn)
 
 			return
 		}
 	}
 
+	content := t.shown
 	if t.wrap {
 		content = lipgloss.NewStyle().Width(t.pager.Width).Render(content)
 	}
@@ -179,15 +179,16 @@ func (t *text) key(m *model, k tea.KeyMsg) tea.Cmd {
 			t.pager.GotoTop()
 		}
 	case "w":
-		t.wrap = !t.wrap
-		t.setContent()
-		t.pager.SetXOffset(0) // wrapped, no line is wider than the window: show them whole
+		if !t.showsCard() { // a card is drawn whole: nothing in it to wrap
+			t.wrap = !t.wrap
+			t.setContent()
+			t.pager.SetXOffset(0) // wrapped, no line is wider than the window: show them whole
+		}
 	case "f":
 		t.full = !t.full
 		t.resize(m.width, m.height)
 	case "c":
-		copyText(strings.Join(t.lines, "\n"))
-		m.flash = fmt.Sprintf("copied %d lines", len(t.lines))
+		m.flash = t.copyShown()
 	case "g", "home":
 		t.pager.GotoTop()
 	case "G", "end":
@@ -221,16 +222,10 @@ func (t *text) view(m *model) string {
 		status = when + dimStyle.Render(" · ") + status
 	}
 
-	wrap := "w wrap"
-
-	switch {
-	case t.showsCard() && t.wrap:
-		wrap = "w full width"
-	case t.showsCard():
-		wrap = "w fit"
+	help := "f fullscreen · c copy · g/G top/bottom · r refresh · esc back · q quit"
+	if !t.showsCard() {
+		help = "w wrap · " + help
 	}
-
-	help := wrap + " · f fullscreen · c copy · g/G top/bottom · r refresh · esc back · q quit"
 
 	switch {
 	case t.follow:
@@ -258,6 +253,20 @@ func (t *text) again(after time.Duration) tea.Cmd {
 	msg := redescribeMsg{t, t.runs}
 
 	return tea.Tick(after, func(time.Time) tea.Msg { return msg })
+}
+
+// copyShown puts what's on screen on the clipboard, without colors: a card, never
+// the output it hides, or the output's lines as they came, not as wrapped. It says
+// what it did.
+func (t *text) copyShown() string {
+	if t.shown == "" {
+		return "nothing to copy"
+	}
+
+	s := ansi.Strip(t.shown)
+	copyText(s)
+
+	return fmt.Sprintf("copied %d lines", strings.Count(s, "\n")+1)
 }
 
 // showsCard says whether the screen shows its output as a card, not as it came.

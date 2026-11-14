@@ -75,6 +75,16 @@ func TestParse(t *testing.T) {
 	if len(r.Stacks) != 3 || r.StacksUp() != 1 {
 		t.Errorf("stacks: %d, up %d: %+v", len(r.Stacks), r.StacksUp(), r.Stacks)
 	}
+
+	// Since their last start or stop, whichever is later; a stack's, its youngest's.
+	cook, utils := r.Stacks[0], r.Stacks[2]
+	if since := cook.Containers[0].Since; !since.Equal(time.Unix(r.Now.Unix()-301, 5e8)) {
+		t.Errorf("exited 5 minutes ago, since %v", since)
+	}
+
+	if since := utils.Since(); !since.Equal(r.Now.Add(-7300 * time.Second)) {
+		t.Errorf("utils since %v, want its init container's stop, the latest", since)
+	}
 }
 
 // Elsewhere than NixOS, there is no deploy time or revision, and nothing's wrong.

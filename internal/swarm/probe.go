@@ -117,7 +117,7 @@ func Parse(out string) (Report, error) {
 		Disk:          usage(kv["disk"]),
 		Docker:        kv["docker"],
 		Units:         parseUnits(sec["units"]),
-		Stacks:        parseStacks(sec["containers"]),
+		Stacks:        parseStacks(sec["containers"], parseTimes(sec["times"])),
 	}
 
 	if up, err := strconv.ParseFloat(kv["uptime"], 64); err == nil {
@@ -168,13 +168,13 @@ func parseUnits(raw string) []Unit {
 }
 
 // parseStacks groups the containers (project, name, state, status per line) by
-// compose project.
-func parseStacks(raw string) []Stack {
+// compose project, with when each last started or stopped (parseTimes).
+func parseStacks(raw string, since map[string]time.Time) []Stack {
 	byName := map[string][]Container{}
 
 	for _, line := range strings.Split(raw, "\n") {
 		if f := strings.Split(line, "\t"); len(f) == 4 && f[0] != "" {
-			byName[f[0]] = append(byName[f[0]], Container{Name: f[1], State: f[2], Status: f[3]})
+			byName[f[0]] = append(byName[f[0]], Container{Name: f[1], State: f[2], Status: f[3], Since: since[f[1]]})
 		}
 	}
 
@@ -184,6 +184,35 @@ func parseStacks(raw string) []Stack {
 	}
 
 	return out
+}
+
+// parseTimes reads when each container last started and stopped (/name, then both
+// times per line), keeping the later: when it last changed state. A container that
+// never ran has docker's zero time for both, the zero time.
+func parseTimes(raw string) map[string]time.Time {
+	since := map[string]time.Time{}
+
+	for _, line := range strings.Split(raw, "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 {
+			continue
+		}
+
+		started, err1 := time.Parse(time.RFC3339Nano, f[1])
+		stopped, err2 := time.Parse(time.RFC3339Nano, f[2])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+
+		last := started
+		if stopped.After(started) { // exited, or waiting to restart
+			last = stopped
+		}
+
+		since[strings.TrimPrefix(f[0], "/")] = last
+	}
+
+	return since
 }
 
 // keyValues reads key=value lines.

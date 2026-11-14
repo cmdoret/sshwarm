@@ -45,6 +45,13 @@ docker_cmd() {
   echo "sudo -n docker" # none works: the containers section shows its error
 }
 
+# container_times prints when each compose container last started and stopped,
+container_times() {
+  # shellcheck disable=SC2086 # words, split on purpose: "sudo -n docker"
+  $docker ps -aq --filter label=com.docker.compose.project |
+    xargs -r $docker inspect --format '{{.Name}} {{.State.StartedAt}} {{.State.FinishedAt}}'
+}
+
 echo "### meta"
 # shellcheck source=/dev/null # the machine's
 echo "os=$(. /etc/os-release && echo "$PRETTY_NAME")"
@@ -75,4 +82,5 @@ if [ -n "$docker" ]; then
   # shellcheck disable=SC2086 # words, split on purpose: "sudo -n docker"
   section containers $docker ps -a --filter label=com.docker.compose.project \
     --format '{{.Label "com.docker.compose.project"}}\t{{.Names}}\t{{.State}}\t{{.Status}}'
+  section times container_times
 fi

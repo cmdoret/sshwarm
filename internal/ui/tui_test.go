@@ -136,6 +136,10 @@ func keyMsg(k string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyTab}
 	case "shift+tab":
 		return tea.KeyMsg{Type: tea.KeyShiftTab}
+	case "shift+left":
+		return tea.KeyMsg{Type: tea.KeyShiftLeft}
+	case "shift+right":
+		return tea.KeyMsg{Type: tea.KeyShiftRight}
 	}
 
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
@@ -181,11 +185,17 @@ echo line-two
 		t.Error("failed unit not first")
 	}
 
-	// Filter, then clear it with esc.
+	// Filter, then clear it with esc: the cursor stays on the unit found.
 	s.keys("/", "glan")
 	s.expect("services 1", "glances.service")
 	s.keys("esc")
 	s.expect("services 3")
+
+	if g := s.top().(*table).grid; g.rows[g.cursor].key != "glances.service" {
+		t.Errorf("the cursor left the unit found for %s", g.rows[g.cursor].key)
+	}
+
+	s.keys("g") // back to the failed unit
 
 	// a shows every unit, then only the interesting ones again.
 	s.keys("a")
@@ -247,7 +257,14 @@ func TestNavigation(t *testing.T) {
 
 	// :ctr arg: every compose container of argiope.
 	s.keys(":", "ctr arg", "enter")
-	s.expect("containers 5", "immich_server", "vert", "cook-cookcli-1")
+	s.expect("containers 5", "immich_server", "vert", "cook-cookcli-1", "J stack")
+
+	// J: from immich_server to its stack, in the stacks tab, even filtered out.
+	s.keys("/", "server", "enter", "J")
+
+	if tb := s.top().(*table); tb.kind != stacks || tb.grid.rows[tb.grid.cursor].key != "immich" || tb.filter.Value() != "" {
+		t.Errorf("J went to %s, on row %d", tb.kind.names[0], tb.grid.cursor)
+	}
 
 	// Back, into the machine; shift+tab goes round the tabs the other way.
 	s.keys("esc", "enter", "shift+tab")
@@ -255,9 +272,16 @@ func TestNavigation(t *testing.T) {
 	s.keys("shift+tab")
 	s.expect("STACK", "PROBLEMS")
 
-	// A stack: enter opens its containers, and l their logs.
+	// A stack: enter opens its containers, J goes back to it, and l the containers' logs.
 	s.keys("enter")
 	s.expect("app-node-argiope › stack cook", "containers 1", "cook-cookcli-1")
+	s.keys("J")
+
+	if n := len(s.m.(model).screens); n != 2 {
+		t.Errorf("J from a stack's containers: %d screens, want the machines and the stacks", n)
+	}
+
+	s.keys("enter")
 	s.logs("l")
 	s.expect("app-node-argiope › container cook-cookcli-1", `ran: timeout 30 sh -c 'docker logs --tail 300 '\''cook-cookcli-1'\'''`)
 
@@ -303,6 +327,86 @@ func TestNavigation(t *testing.T) {
 	// :machines goes back to the bottom.
 	s.keys(":", "machines", "enter")
 	s.expect("machines 1", "enter open")
+}
+
+// A machine running no stack has no stacks or containers tab, docker or not.
+func TestTabs(t *testing.T) {
+	r := fixture(t)
+	r.Stacks = nil // docker, still
+
+	s := start(t, r)
+	s.keys(":", "st arg", "enter")
+	s.expect("app-node-argiope has no stacks")
+}
+
+// The tables sort on a column: selected with shift and the arrows then O, or with
+// k9s's keys. Numbers sort biggest first, text from A ignoring case, and the other
+// way round on the same column again. The cursor stays on its row.
+func TestSort(t *testing.T) {
+	r := fixture(t)
+	idle := r
+	idle.Host = swarm.Host{Name: "Idle"}
+	idle.Units, idle.Stacks, idle.Disk = nil, nil, 12
+
+	down := swarm.Report{Host: swarm.Host{Name: "down"}, Err: errTest}
+
+	s := start(t, idle, r, down)
+	s.expect("⇧←→ column • O sort")
+
+	order := func(want ...string) {
+		t.Helper()
+
+		var keys []string
+		for _, row := range s.top().(*table).grid.rows {
+			keys = append(keys, row.key)
+		}
+
+		if !slices.Equal(keys, want) {
+			t.Errorf("rows %q, want %q", keys, want)
+		}
+	}
+
+	on := func(want string) {
+		t.Helper()
+
+		if g := s.top().(*table).grid; g.rows[g.cursor].key != want {
+			t.Errorf("the cursor is on %s, not %s", g.rows[g.cursor].key, want)
+		}
+	}
+
+	// The worst state first, then the other way round.
+	s.keys("S")
+	order("down", "app-node-argiope", "Idle")
+	s.expect("STATE ↓")
+	s.keys("S")
+	order("Idle", "app-node-argiope", "down")
+	s.expect("STATE ↑")
+
+	// From STATE to DISK: the fullest first, the unknown last.
+	for range slices.Index(machineTitles, "DISK") - 1 {
+		s.keys("shift+right")
+	}
+
+	s.keys("O")
+	order("app-node-argiope", "Idle", "down")
+	s.expect("DISK ↓")
+
+	// The cursor stays on its machine through the sorts, and a refresh that
+	// reorders the rows.
+	idle.Disk = 99
+	s.m, _ = s.m.Update(reportsMsg{idle, r, down})
+	order("Idle", "app-node-argiope", "down")
+	on("Idle")
+
+	s.keys("N")
+	order("app-node-argiope", "down", "Idle")
+	on("Idle")
+
+	// Containers sort on the time since they last started or stopped, to the second:
+	// all "2h" but the one that exited 5 minutes ago.
+	s.keys(":", "ctr arg", "enter", "A")
+	s.expect("AGE ↓", "5m")
+	order("immich_redis", "vert", "utils-init-volumes-1", "immich_server", "cook-cookcli-1")
 }
 
 // d describes a machine, a unit, a stack or a container, and s opens a shell on a
@@ -459,8 +563,46 @@ func TestCard(t *testing.T) {
 	}
 }
 
-// In a narrow window, a card fits it, cutting long lines; w makes it as wide as its
-// content, to scroll left and right.
+// c copies what's on screen: a card, never the values it hides, even while the next
+// description comes in under it; the output as it came, once asked for.
+func TestCopy(t *testing.T) {
+	var copied string
+
+	saved := copyText
+	t.Cleanup(func() { copyText = saved })
+	copyText = func(s string) { copied = s }
+
+	raw, err := os.ReadFile("../swarm/testdata/container.describe")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := newText("describe", swarm.Host{}, "", containerCard)
+	c.resize(80, 30)
+	c.lines = strings.Split(string(raw), "\n")
+	c.setContent()
+
+	if c.copyShown(); !strings.Contains(copied, "Environment (values hidden)") || strings.Contains(copied, "hunter2") {
+		t.Errorf("copied, from the card:\n%s", copied)
+	}
+
+	c.lines, c.ch = []string{`"Env": ["DB_PASSWORD=hunter2"`}, make(chan string) // refreshing
+	c.setContent()
+
+	if c.copyShown(); strings.Contains(copied, "hunter2") || !strings.Contains(copied, "Environment") {
+		t.Errorf("copied, from the card being refreshed:\n%s", copied)
+	}
+
+	c.raw = true
+	c.setContent()
+
+	if c.copyShown(); copied != c.lines[0] {
+		t.Errorf("copied %q, not the raw output on screen", copied)
+	}
+}
+
+// In a narrow window, a card is still drawn whole: its long lines scroll left and
+// right, and there's nothing to wrap.
 func TestCardScroll(t *testing.T) {
 	r := fixture(t)
 	fakeBin(t, "ssh", "cat ../swarm/testdata/unit.describe")
@@ -471,16 +613,12 @@ func TestCardScroll(t *testing.T) {
 	s.logs("d")
 
 	// The title gives way to the status, rather than the status to the window's edge.
-	s.expect("Recent logs", "w full width", "refreshed ", "─╮")
+	s.expect("Recent logs", "refreshed ", "─╮")
 
-	if strings.Contains(s.m.View(), "INVALIDARGUMENT") {
-		t.Error("a long line fits a narrow window")
+	if v := s.m.View(); strings.Contains(v, "INVALIDARGUMENT") || strings.Contains(v, "w wrap") {
+		t.Errorf("a long line fits a narrow window, or a card wraps:\n%s", v)
 	}
 
-	s.keys("w", "l", "l", "l", "l", "l", "l", "l", "l")
-	s.expect("status=2/INVALIDARGUMENT", "w fit")
-
-	// Back to fitting the window: from its left edge again.
-	s.keys("w")
-	s.expect("  Name          backup.service")
+	s.keys("l", "l", "l", "l", "l", "l", "l", "l")
+	s.expect("status=2/INVALIDARGUMENT")
 }

@@ -91,6 +91,16 @@ func (t *table) key(m *model, k tea.KeyMsg) tea.Cmd {
 		if host, key, ok := t.selected(m); ok {
 			return t.kind.enter(m, host, key)
 		}
+	case "N": // k9s's sort keys: name, status, age
+		t.grid.sortOn(0)
+	case "S":
+		t.grid.sortOn(t.kind.status)
+	case "A":
+		if t.kind.age > 0 {
+			t.grid.sortOn(t.kind.age)
+		}
+	case "J":
+		t.owner(m)
 	default:
 		t.grid.key(k)
 	}
@@ -159,10 +169,36 @@ func (t *table) nextTab(m *model, step int) {
 		return
 	}
 
-	t.kind, t.stack = tabs[(slices.Index(tabs, t.kind)+step+len(tabs))%len(tabs)], ""
-	t.grid = grid{titles: t.kind.titles}
+	t.switchTo(m, tabs[(slices.Index(tabs, t.kind)+step+len(tabs))%len(tabs)])
+}
+
+// switchTo shows the machine's kind k in this table, as its tab does.
+func (t *table) switchTo(m *model, k *kind) {
+	t.kind, t.stack = k, ""
+	t.grid = grid{titles: k.titles}
 	t.resize(m.width, m.height)
 	t.fill(m)
+}
+
+// owner jumps from a container to its stack: back to the stack's screen if the
+// container was listed from there, or else to the stacks tab, unfiltered so that the
+// stack is in it.
+func (t *table) owner(m *model) {
+	if t.stack != "" {
+		m.pop()
+
+		return
+	}
+
+	if t.kind != containers || len(t.grid.rows) == 0 {
+		return
+	}
+
+	stack := t.grid.rows[t.grid.cursor].owner
+
+	t.filter.SetValue("")
+	t.switchTo(m, stacks)
+	t.grid.choose(stack)
 }
 
 func (t *table) view(m *model) string {
@@ -175,6 +211,8 @@ func (t *table) view(m *model) string {
 	if t.grid.hidden() > 0 {
 		help += " · ←→ scroll"
 	}
+
+	help += " · ⇧←→ column · O sort"
 
 	if t.kind == machines {
 		title := crumbs(fmt.Sprintf("machines %d", len(m.reports))) + filter

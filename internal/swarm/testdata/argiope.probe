@@ -39,3 +39,9 @@ immich	immich_redis	running	Up 2 hours (healthy)
 utils	utils-init-volumes-1	exited	Exited (0) 2 hours ago
 utils	vert	running	Up 2 hours
 cook	cook-cookcli-1	exited	Exited (1) 5 minutes ago
+### times
+/immich_server 2026-11-10T06:40:00.000000000Z 0001-01-01T00:00:00Z
+/immich_redis 2026-11-10T06:35:00Z 0001-01-01T00:00:00Z
+/utils-init-volumes-1 2026-11-10T06:38:10Z 2026-11-10T06:38:20Z
+/vert 2026-11-10T06:36:40Z 2026-11-09T07:40:00Z
+/cook-cookcli-1 2026-11-10T08:34:50Z 2026-11-10T08:34:59.5Z
