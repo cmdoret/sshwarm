@@ -4,7 +4,6 @@ package ui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -292,8 +291,9 @@ func (m *model) commandKey(k tea.KeyMsg) tea.Cmd {
 }
 
 // goTo opens the table a command names: a kind, then a machine by name, or else
-// the machine on screen. Like k9s, it starts over from the machines, so esc goes
-// back there; ":machines" just goes back.
+// the machine on screen; every machine's with "all", or from the machines. Like
+// k9s, it starts over from the machines, so esc goes back there; ":machines" just
+// goes back.
 func (m *model) goTo(command string) tea.Cmd {
 	kindName, name, _ := strings.Cut(strings.TrimSpace(command), " ")
 	if kindName == "" {
@@ -325,14 +325,17 @@ func (m *model) goTo(command string) tea.Cmd {
 		return nil
 	}
 
-	if r := m.reports[host]; r.Err == nil && !slices.Contains(tabsOf(r), k) {
-		m.flash = fmt.Sprintf("%s has no %s", r.Host.Name, k.names[0])
+	if host >= 0 && m.reports[host].Err == nil && !slices.Contains(tabsOf(m.reports[host]), k) {
+		m.flash = fmt.Sprintf("%s has no %s", m.hosts[host].Name, k.names[0])
 
 		return nil
 	}
 
 	m.popTo(1)
-	m.fleet.grid.choose(m.hosts[host].Name) // so that esc goes back to it
+
+	if host >= 0 {
+		m.fleet.grid.choose(m.hosts[host].Name) // so that esc goes back to it
+	}
 
 	return m.push(newHost(k, host, ""))
 }
@@ -343,9 +346,13 @@ func (m *model) shell(h inventory.Host, cmd string) tea.Cmd {
 	return execProcess(remote.Interactive(m.ctx, h, cmd), func(err error) tea.Msg { return shellDoneMsg{err} })
 }
 
-// machine is the index of the machine named, or else of the one on screen.
+// machine is the index of the machine named, or else of the one on screen; -1 for
+// every machine: named "all", or none on screen.
 func (m *model) machine(name string) (int, error) {
-	if name != "" {
+	switch {
+	case name == "all":
+		return -1, nil
+	case name != "":
 		return inventory.Find(m.hosts, name)
 	}
 
@@ -355,7 +362,7 @@ func (m *model) machine(name string) (int, error) {
 		}
 	}
 
-	return -1, errors.New("which machine? e.g. :ctr web-1")
+	return -1, nil
 }
 
 // View shows the top screen, every line cut to the window's width.

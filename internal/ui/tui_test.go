@@ -277,6 +277,49 @@ echo line-two
 	s.expect("machines 1", "enter open")
 }
 
+// From the machines, or with "all", the command bar lists every machine's rows, by
+// machine: each row acts on its own machine, by its own name.
+func TestEveryMachine(t *testing.T) {
+	argiope, web := fixture(t), fixture(t)
+	web.Host = inventory.Host{Name: "web-1", Address: "web-1"}
+	down := swarm.Report{Host: inventory.Host{Name: "db"}, Err: errTest}
+	testutil.FakeBin(t, "ssh", `eval remote=\${$#}; printf 'ran: %s\n' "$remote"`)
+
+	s := start(t, argiope, web, down)
+
+	s.keys(":", "ctr", "enter")
+	s.expect("all machines", "1 down", "containers 10", "services 6", "MACHINE", "web-1")
+
+	// S sorts on STATE, past the MACHINE column.
+	s.keys("S")
+
+	if col := s.list().grid.col; col != 3 {
+		t.Errorf("S sorted on column %d, want STATE's, 3", col)
+	}
+
+	// web-1's vert: its logs are web-1's, J goes to its stack, enter to that stack's
+	// containers on web-1.
+	s.keys("/", "web-1/vert", "enter")
+	s.logs("l")
+
+	if o := s.output(); o.host.Name != "web-1" || !strings.Contains(o.cmd, "logs") || !strings.Contains(o.cmd, "'vert'") {
+		t.Errorf("logs of web-1's vert: on %s, %s", o.host.Name, o.cmd)
+	}
+
+	s.keys("esc", "J")
+
+	if got := s.selected(); got != "web-1/utils" {
+		t.Errorf("J went to %q, want web-1/utils", got)
+	}
+
+	s.keys("enter")
+	s.expect("web-1 › stack utils", "containers 2")
+
+	// From a machine's screen, "all" lists every machine's.
+	s.keys(":", "svc arg", "enter", ":", "svc all", "enter")
+	s.expect("all machines", "services 6", "glances.service")
+}
+
 // Stacks open on their containers, the command bar goes to any machine's table,
 // and the logs view wraps, goes fullscreen and copies.
 func TestNavigation(t *testing.T) {
@@ -292,9 +335,7 @@ func TestNavigation(t *testing.T) {
 
 	s := start(t, r)
 
-	// The command bar: without a machine on screen, it asks which one.
-	s.keys(":", "ctr", "enter")
-	s.expect("which machine?")
+	// The command bar: a machine or a table that isn't there.
 	s.keys(":", "ctr nope", "enter")
 	s.expect(`no machine matches "nope"`)
 	s.keys(":", "x", "enter")

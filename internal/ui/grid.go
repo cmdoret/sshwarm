@@ -30,10 +30,11 @@ func dot(t tone, text string) cell { return cell{text: text, tone: t, dot: true}
 
 // row is one line of a grid: a cell per column.
 type row struct {
-	cells []cell
-	tone  tone
-	key   string // what the row is about: a machine, unit, stack or container name
-	owner string // what that belongs to: a container's stack
+	cells   []cell
+	tone    tone
+	key     string // what the row is about: a machine, unit, stack or container name
+	owner   string // what that belongs to: a container's stack
+	machine int    // in a list of every machine's rows: its machine's index in the reports
 }
 
 // grid is a scrolling table with one selected row, and one selected column to sort

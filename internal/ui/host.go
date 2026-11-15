@@ -11,15 +11,16 @@ import (
 )
 
 // host is a machine's screen: a tab per kind it has (tabsOf), listing its services,
-// stacks or containers, or one stack's containers.
+// stacks or containers, or one stack's containers. With machine -1, it lists every
+// machine's (list.every).
 type host struct {
 	list
-	machine int    // its index in the reports
+	machine int    // its index in the reports; -1 for every machine
 	stack   string // containers: only this stack's; "" for all
 }
 
 func newHost(k *kind, machine int, stack string) *host {
-	return &host{list: newList(k), machine: machine, stack: stack}
+	return &host{list: newList(k, machine < 0), machine: machine, stack: stack}
 }
 
 func (h *host) open(m *model) tea.Cmd {
@@ -28,9 +29,33 @@ func (h *host) open(m *model) tea.Cmd {
 	return nil
 }
 
-// fill lists the machine's rows of the kind on screen.
-func (h *host) fill(m *model) {
-	h.load(h.kind.rows(m.reports[h.machine], scope{all: m.all, stack: h.stack}))
+// fill lists the rows of the kind on screen.
+func (h *host) fill(m *model) { h.load(h.rowsOf(m, h.kind, scope{all: m.all, stack: h.stack})) }
+
+// rowsOf is k's rows in scope sc: the machine's, or every machine's. Those get a
+// MACHINE column after the first, and keys and owners of "<machine>/<name>", which
+// pick undoes: rows of different machines can have the same name.
+func (h *host) rowsOf(m *model, k *kind, sc scope) []row {
+	if !h.every {
+		return k.rows(m.reports[h.machine], sc)
+	}
+
+	var rows []row
+
+	for i, r := range m.reports {
+		for _, rw := range k.rows(r, sc) {
+			rw.cells = slices.Insert(rw.cells, 1, cell{text: r.Host.Name})
+			rw.key, rw.machine = r.Host.Name+"/"+rw.key, i
+
+			if rw.owner != "" {
+				rw.owner = r.Host.Name + "/" + rw.owner
+			}
+
+			rows = append(rows, rw)
+		}
+	}
+
+	return rows
 }
 
 func (h *host) update(m *model, msg tea.Msg) tea.Cmd {
@@ -71,7 +96,7 @@ func (h *host) key(m *model, k tea.KeyMsg) tea.Cmd {
 		}
 
 		if p := h.pick(m); p != nil {
-			return m.push(newHost(h.kind.drill, h.machine, p.key))
+			return m.push(newHost(h.kind.drill, p.machine, p.key))
 		}
 	default:
 		return h.list.key(m, k, h.pick(m))
@@ -80,20 +105,43 @@ func (h *host) key(m *model, k tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// pick is the row under the cursor, if any.
+// pick is the row under the cursor, if any: on its own machine, by its own name.
 func (h *host) pick(m *model) *pick {
 	key, ok := h.grid.selected()
 	if !ok {
 		return nil
 	}
 
-	return &pick{machine: h.machine, r: m.reports[h.machine], key: key}
+	if !h.every {
+		return &pick{machine: h.machine, r: m.reports[h.machine], key: key}
+	}
+
+	i := h.grid.rows[h.grid.cursor].machine
+	r := m.reports[i]
+
+	return &pick{machine: i, r: r, key: strings.TrimPrefix(key, r.Host.Name+"/")}
 }
 
-// nextTab shows the machine's next kind, or with step -1 the previous one, if it
-// has more than one.
+// tabs are the kinds the screen has a tab for: its machine's, or every machine's,
+// with stacks and containers if any has some.
+func (h *host) tabs(m *model) []*kind {
+	if !h.every {
+		return tabsOf(m.reports[h.machine])
+	}
+
+	for _, r := range m.reports {
+		if len(r.Stacks) > 0 {
+			return tabsOf(r)
+		}
+	}
+
+	return []*kind{services}
+}
+
+// nextTab shows the next kind, or with step -1 the previous one, if there's more
+// than one.
 func (h *host) nextTab(m *model, step int) {
-	tabs := tabsOf(m.reports[h.machine])
+	tabs := h.tabs(m)
 	if len(tabs) < 2 {
 		return
 	}
@@ -101,10 +149,10 @@ func (h *host) nextTab(m *model, step int) {
 	h.switchTo(m, tabs[(slices.Index(tabs, h.kind)+step+len(tabs))%len(tabs)])
 }
 
-// switchTo shows the machine's kind k on this screen, as its tab does.
+// switchTo shows kind k on this screen, as its tab does.
 func (h *host) switchTo(m *model, k *kind) {
 	h.kind, h.stack = k, ""
-	h.grid = grid{titles: k.titles}
+	h.grid = grid{titles: h.titles()}
 	h.resize(m.width, m.height)
 	h.fill(m)
 }
@@ -137,29 +185,20 @@ func (h *host) resize(width, height int) {
 }
 
 func (h *host) view(m *model) frame {
-	r := m.reports[h.machine]
-
-	where := []string{r.Host.Name}
-	if h.stack != "" {
-		where = append(where, "stack "+h.stack)
-	}
-
-	title := crumbs(where...) + dimStyle.Render(" · "+r.OS) + revision(r.Revision) + dimStyle.Render(" · up "+short(r.Uptime))
-
-	if r.Err != nil {
+	if !h.every && m.reports[h.machine].Err != nil {
 		return frame{
-			title: title, status: m.refreshStatus(),
-			body: toneStyles[bad].Render("down: " + r.Err.Error()),
+			title: h.title(m), status: m.refreshStatus(),
+			body: toneStyles[bad].Render("down: " + m.reports[h.machine].Err.Error()),
 			help: []key.Binding{keyRefresh, keyBack, keyQuit},
 		}
 	}
 
 	var tabs strings.Builder
 
-	for _, k := range tabsOf(r) {
+	for _, k := range h.tabs(m) {
 		n := len(h.grid.rows) // the current tab: its rows, as shown
 		if k != h.kind {
-			n = len(matching(k.rows(r, scope{all: m.all}), h.filter.Value()))
+			n = len(matching(h.rowsOf(m, k, scope{all: m.all}), h.filter.Value()))
 		}
 
 		tab := fmt.Sprintf("%s %d", k.names[0], n)
@@ -182,10 +221,40 @@ func (h *host) view(m *model) frame {
 	}
 
 	return frame{
-		title: title, status: m.refreshStatus(),
+		title: h.title(m), status: m.refreshStatus(),
 		body: tabs.String() + h.filterView() + "\n" + h.grid.view(),
 		help: append(help, keyTab, keyFilter, keyGoTo, keyBack, keyQuit),
 	}
+}
+
+// title is where the screen is, then its machine's OS, revision and uptime; for
+// every machine, how many are down, as their rows are missing.
+func (h *host) title(m *model) string {
+	if h.every {
+		down := 0
+
+		for _, r := range m.reports {
+			if r.Err != nil {
+				down++
+			}
+		}
+
+		title := crumbs("all machines")
+		if down > 0 {
+			title += toneStyles[bad].Render(fmt.Sprintf(" · %d down", down))
+		}
+
+		return title
+	}
+
+	r := m.reports[h.machine]
+
+	where := []string{r.Host.Name}
+	if h.stack != "" {
+		where = append(where, "stack "+h.stack)
+	}
+
+	return crumbs(where...) + dimStyle.Render(" · "+r.OS) + revision(r.Revision) + dimStyle.Render(" · up "+short(r.Uptime))
 }
 
 func (h *host) close()       {}
