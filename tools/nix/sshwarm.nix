@@ -5,12 +5,14 @@
   src,
 }:
 let
-  version = "1.3.0";
+  # Set by `just release::bump`.
+  version = lib.trim (builtins.readFile ./sshwarm-version.txt);
   rev = src.rev or src.dirtyRev or "unknown";
 in
 buildGoModule {
   pname = "sshwarm";
   inherit version src;
+  # Set by `just nix::update`.
   vendorHash = builtins.readFile ./sshwarm-hash.txt;
   # No cgo: a static binary, which runs on any machine of its kind (no links to nix store).
   env.CGO_ENABLED = 0;

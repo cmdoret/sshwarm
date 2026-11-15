@@ -35,6 +35,37 @@ export def "main update-hash" [
   $found.0.hash | save --force $hash_file
   log info "Hash updated"
 }
+
+# Sets the version in a text file, either from a semver string or bump type.
+export def "main update-version" [
+  version: string # The new version, e.g. 1.4.0 or bump (major|minor|patch)
+  version_file: string # File storing the version, must exist.
+  --dry-run # Print the version it would set, and set nothing
+] {
+  let old = (open --raw $version_file | str trim | into semver)
+  let new = if $version in [major minor patch] {
+    $old | semver bump $version
+  } else {
+    try { $version | str replace --regex '^v' '' | into semver } catch {
+      log error $"Not a version: ($version), want x.y.z, or major, minor or patch"
+      exit 1
+    }
+  }
+
+  # It must come after the version there: catches a typo, and a bump that doesn't.
+  if $new <= $old {
+    log error $"Version ($new | into string) isn't after ($old | into string)"
+    exit 1
+  }
+
+  if $dry_run {
+    print ($new | into string)
+    return
+  }
+
+  $new | into string | save --force $version_file
+  log info $"Version ($old | into string) -> ($new | into string)"
+}
 #
 # Nix helper commands.
 #
