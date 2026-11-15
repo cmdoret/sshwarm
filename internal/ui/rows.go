@@ -126,11 +126,8 @@ func stackRow(r swarm.Report, s swarm.Stack) row {
 	var problems []string
 
 	for _, c := range s.Containers {
-		switch {
-		case c.RecentRestart && c.Condition() == swarm.Warning: // its status would read fine: "Up 40 seconds"
-			problems = append(problems, fmt.Sprintf("%s restarted ×%d", c.Name, c.Restarts))
-		case c.Condition() != swarm.Fine:
-			problems = append(problems, c.Name+" "+c.Status)
+		if t := c.Trouble(); t != "" {
+			problems = append(problems, c.Name+" "+t)
 		}
 	}
 
