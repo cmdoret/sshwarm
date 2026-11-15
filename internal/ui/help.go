@@ -13,7 +13,7 @@ import (
 
 // anywhere are the keys every screen takes, for the help screen: those at the end of
 // every help line (everywhere), and ^c.
-var anywhere = []key.Binding{as(keyGoTo, "go to: :ctr web, :svc all"), keyHelp, keyQuit, keyForceQuit}
+var anywhere = []key.Binding{as(keyGoTo, "go to: :ctr web, :svc all, tab completes"), keyHelp, keyQuit, keyForceQuit}
 
 // helpScreen lists the keys of the screen under it, as k9s's does: its own, then
 // those that move around it, then those every screen takes.

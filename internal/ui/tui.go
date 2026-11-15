@@ -97,6 +97,8 @@ type model struct {
 func newModel(ctx context.Context, hosts []inventory.Host, timeout, interval time.Duration) *model {
 	c := textinput.New()
 	c.Prompt = ":"
+	c.ShowSuggestions, c.CompletionStyle = true, dimStyle // tab takes the one shown, ↑↓ go through the others
+	c.SetSuggestions(commands(hosts))
 
 	fleet := newFleet()
 
@@ -354,6 +356,28 @@ func (m *model) goTo(command string) tea.Cmd {
 	}
 
 	return m.push(newHost(k, host, ""))
+}
+
+// commands are what the command bar completes, from what's typed: every kind's
+// names, alone, or but for machines', followed by all or a machine's name.
+func commands(hosts []inventory.Host) []string {
+	var out []string
+
+	for _, k := range kinds {
+		for _, name := range k.names {
+			out = append(out, name)
+			if k == machines {
+				continue
+			}
+
+			out = append(out, name+" all")
+			for _, h := range hosts {
+				out = append(out, name+" "+h.Name)
+			}
+		}
+	}
+
+	return out
 }
 
 // shell hands the terminal to ssh on h, running cmd, or with cmd "", a login shell.
