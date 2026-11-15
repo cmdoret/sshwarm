@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -38,6 +39,9 @@ type options struct {
 	hosts, flake      string
 	timeout, refresh  time.Duration
 	version, readOnly bool
+
+	// defaultHosts is the hosts file read without a hosts file or a flake given.
+	defaultHosts string
 }
 
 func main() {
@@ -68,12 +72,22 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 func dispatch(ctx context.Context, args []string, stdout io.Writer, getenv func(string) string) error {
 	var opts options
 
-	fs := globalFlags(&opts, getenv)
-	if err := fs.Parse(args); err != nil {
+	fs, err := globalFlags(&opts, getenv)
+	if err != nil {
+		return err
+	}
+
+	if err = fs.Parse(args); err != nil {
 		return err
 	}
 
 	args = fs.Args()
+
+	if opts.hosts == "" && opts.flake == "" { // either flag beats both variables
+		opts.hosts, opts.flake = getenv("SSHWARM_HOSTS"), getenv("SSHWARM_FLAKE")
+	}
+
+	opts.defaultHosts = defaultHostsFile(getenv)
 
 	if opts.version {
 		_, err := fmt.Fprintln(stdout, versionLine())
@@ -100,18 +114,62 @@ func dispatch(ctx context.Context, args []string, stdout io.Writer, getenv func(
 	return fmt.Errorf("unknown command %q, see sshwarm --help", args[0])
 }
 
-// globalFlags is the flag set of the flags before the command, set into opts; their
-// defaults come from the environment, read with getenv.
-func globalFlags(opts *options, getenv func(string) string) *flag.FlagSet {
+// globalFlags is the flag set of the flags before the command, set into opts. Their
+// defaults come from the environment, read with getenv, but --hosts and --flake's:
+// either flag beats both variables, so dispatch reads them once the flags are parsed.
+func globalFlags(opts *options, getenv func(string) string) (*flag.FlagSet, error) {
+	timeout, err := envDuration(getenv, "SSHWARM_TIMEOUT", defaultTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	refresh, err := envDuration(getenv, "SSHWARM_REFRESH", defaultRefresh)
+	if err != nil {
+		return nil, err
+	}
+
 	fs := newFlagSet("sshwarm")
-	fs.StringVar(&opts.hosts, "hosts", getenv("SSHWARM_HOSTS"), "")
-	fs.StringVar(&opts.flake, "flake", getenv("SSHWARM_FLAKE"), "")
-	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "")
-	fs.DurationVar(&opts.refresh, "refresh", defaultRefresh, "")
+	fs.StringVar(&opts.hosts, "hosts", "", "")
+	fs.StringVar(&opts.flake, "flake", "", "")
+	fs.DurationVar(&opts.timeout, "timeout", timeout, "")
+	fs.DurationVar(&opts.refresh, "refresh", refresh, "")
 	fs.BoolVar(&opts.version, "version", false, "")
 	fs.BoolVar(&opts.readOnly, "read-only", envOn(getenv("SSHWARM_READ_ONLY")), "")
 
-	return fs
+	return fs, nil
+}
+
+// envDuration is the duration in the environment variable name, read with getenv,
+// or def if it's not set.
+func envDuration(getenv func(string) string, name string, def time.Duration) (time.Duration, error) {
+	v := getenv(name)
+	if v == "" {
+		return def, nil
+	}
+
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", name, err)
+	}
+
+	return d, nil
+}
+
+// defaultHostsFile is sshwarm/hosts.toml in $XDG_CONFIG_HOME, else in ~/.config,
+// also on macOS, where command-line tools keep their dotfiles rather than in
+// os.UserConfigDir's ~/Library. Empty without a home.
+func defaultHostsFile(getenv func(string) string) string {
+	dir := getenv("XDG_CONFIG_HOME")
+	if !filepath.IsAbs(dir) { // the XDG spec ignores a relative path
+		home := getenv("HOME")
+		if home == "" {
+			return ""
+		}
+
+		dir = filepath.Join(home, ".config")
+	}
+
+	return filepath.Join(dir, "sshwarm", "hosts.toml")
 }
 
 // envOn says whether an environment variable's value v turns something on: set, but
@@ -239,16 +297,25 @@ func newFlagSet(name string) *flag.FlagSet {
 	return fs
 }
 
-// loadHosts loads the machines, from the hosts file or else the flake.
+// loadHosts loads the machines from the hosts file or the flake, else from the
+// default hosts file.
 func loadHosts(ctx context.Context, opts options) ([]inventory.Host, error) {
 	switch {
+	case opts.hosts != "" && opts.flake != "":
+		return nil, fmt.Errorf("both a hosts file (%s) and a flake (%s): choose one", opts.hosts, opts.flake)
 	case opts.hosts != "":
 		return inventory.LoadFile(opts.hosts)
 	case opts.flake != "":
 		return inventory.LoadFlake(ctx, opts.flake)
 	}
 
-	return nil, errors.New("no hosts provided: use --hosts <file> or --flake <dir>, or set SSHWARM_HOSTS or SSHWARM_FLAKE")
+	hosts, err := inventory.LoadFile(opts.defaultHosts)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("no hosts provided: use --hosts <file> or --flake <dir>, set SSHWARM_HOSTS or SSHWARM_FLAKE, or write %s",
+			cmp.Or(opts.defaultHosts, "$XDG_CONFIG_HOME/sshwarm/hosts.toml"))
+	}
+
+	return hosts, err
 }
 
 // usage writes sshwarm's help to w.
@@ -265,14 +332,16 @@ with sshwarm <command> --help.
 Flags, before the command:
 
   --hosts <file>         the TOML hosts file, see below (default: $SSHWARM_HOSTS)
-  --flake <dir>          without --hosts, the flake defining deploy.nodes (default: $SSHWARM_FLAKE)
-  --timeout <duration>   probe timeout, per machine (default: %v)
-  --refresh <duration>   how often the browser refreshes (default: %v)
+  --flake <dir>          or the flake defining deploy.nodes (default: $SSHWARM_FLAKE)
+  --timeout <duration>   probe timeout, per machine (default: $SSHWARM_TIMEOUT, else %v)
+  --refresh <duration>   how often the browser refreshes (default: $SSHWARM_REFRESH, else %v)
   --read-only            don't start, stop, restart or reboot anything, nor open shells (default: $SSHWARM_READ_ONLY set, but to 0 or false)
   --version              print the version and the commit it was built from
 
-Hosts file, one [[host]] per machine. ssh looks up its host, or else its name, in
-~/.ssh/config for anything not set here:
+Hosts file, one [[host]] per machine. Without --hosts, --flake or their
+variables, sshwarm reads $XDG_CONFIG_HOME/sshwarm/hosts.toml (by default in
+~/.config). ssh looks up its host, or else its name, in ~/.ssh/config for
+anything not set here:
 
   [[host]]
   name = "db"                  # ssh db

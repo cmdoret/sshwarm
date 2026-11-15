@@ -50,8 +50,9 @@ sshwarm --hosts hosts.toml
 ### Hosts file
 
 Only `name` is required. ssh looks up `host`, or else `name`, in `~/.ssh/config` for
-anything not set in the file, like ports or jump hosts. Set `SSHWARM_HOSTS` or
-`SSHWARM_FLAKE` to skip the flag. See `sshwarm --help` for more.
+anything not set in the file, like ports or jump hosts. Save it as
+`~/.config/sshwarm/hosts.toml`, or set `SSHWARM_HOSTS` or `SSHWARM_FLAKE`, to skip
+the flag. See `sshwarm --help` for more.
 
 ```toml
 # hosts.toml: one [[host]] per machine
