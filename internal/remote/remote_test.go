@@ -1,6 +1,8 @@
 package remote
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -24,6 +26,62 @@ func TestCommand(t *testing.T) {
 	// No remote command: a login shell.
 	if args := Command(t.Context(), inventory.Host{Address: "h"}, true, "").Args; args[len(args)-1] != "h" {
 		t.Errorf("want the destination last: %q", args)
+	}
+}
+
+// Share has ssh share connections, with their sockets in ~/.ssh, but to a host
+// whose ssh config already sets how, as ssh -G tells, or if ssh -G fails; and none
+// without a ~/.ssh to keep the sockets in, or with one too long for their paths.
+func TestShare(t *testing.T) {
+	testutil.FakeBin(t, "ssh", `case "$*" in
+  *own*) printf 'user me\ncontrolmaster auto\ncontrolpath /home/me/.ssh/cm-x\n' ;;
+  *broken*) exit 255 ;;
+  *) printf 'user me\ncontrolmaster false\ncontrolpersist no\n' ;;
+esac`)
+
+	// A home short enough for a socket's path, which t.TempDir's isn't under a long
+	// TMPDIR, as nix develop's or macOS's.
+	home, err := os.MkdirTemp("/tmp", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	t.Setenv("HOME", home)
+
+	hosts := []inventory.Host{{Address: "plain", Opts: []string{"-p", "2222"}}, {Address: "own"}, {Address: "broken"}}
+
+	if got := Share(t.Context(), hosts); got[0].Opts[0] != "-p" {
+		t.Errorf("shared without a ~/.ssh: %q", got[0].Opts)
+	}
+
+	long := filepath.Join(home, strings.Repeat("x", 40))
+	for _, h := range []string{home, long} {
+		if err := os.MkdirAll(filepath.Join(h, ".ssh"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Setenv("HOME", long)
+
+	if got := Share(t.Context(), hosts); got[0].Opts[0] != "-p" {
+		t.Errorf("shared with a ~/.ssh too long for a socket's path: %q", got[0].Opts)
+	}
+
+	t.Setenv("HOME", home)
+
+	got := Share(t.Context(), hosts)
+
+	if i := slices.Index(got[0].Opts, `ControlPath="`+home+`/.ssh/sshwarm-%C"`); i < 0 || got[0].Opts[len(got[0].Opts)-2] != "-p" {
+		t.Errorf("plain host: %q, want the socket in ~/.ssh, before its own options", got[0].Opts)
+	}
+
+	if got[1].Opts != nil || got[2].Opts != nil {
+		t.Errorf("own config, or no ssh -G: %q, %q, want them left alone", got[1].Opts, got[2].Opts)
+	}
+
+	if hosts[0].Opts[0] != "-p" {
+		t.Errorf("Share changed the hosts it was given: %q", hosts[0].Opts)
 	}
 }
 

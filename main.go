@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cmdoret/sshwarm/internal/inventory"
+	"github.com/cmdoret/sshwarm/internal/remote"
 	"github.com/cmdoret/sshwarm/internal/swarm"
 	"github.com/cmdoret/sshwarm/internal/ui"
 )
@@ -101,7 +102,8 @@ func dispatch(ctx context.Context, args []string, stdout io.Writer, getenv func(
 			return err
 		}
 
-		return ui.Run(ctx, hosts, opts.timeout, opts.refresh, opts.readOnly)
+		// The browser probes again and again: keeping one connection per machine.
+		return ui.Run(ctx, remote.Share(ctx, hosts), opts.timeout, opts.refresh, opts.readOnly)
 	}
 
 	switch args[0] {
@@ -155,9 +157,8 @@ func envDuration(getenv func(string) string, name string, def time.Duration) (ti
 	return d, nil
 }
 
-// defaultHostsFile is sshwarm/hosts.toml in $XDG_CONFIG_HOME, else in ~/.config,
-// also on macOS, where command-line tools keep their dotfiles rather than in
-// os.UserConfigDir's ~/Library. Empty without a home.
+// defaultHostsFile is sshwarm/hosts.toml in $XDG_CONFIG_HOME, else in ~/.config.
+// Empty without a home.
 func defaultHostsFile(getenv func(string) string) string {
 	dir := getenv("XDG_CONFIG_HOME")
 	if !filepath.IsAbs(dir) { // the XDG spec ignores a relative path

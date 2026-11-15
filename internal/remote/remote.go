@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -40,12 +43,84 @@ func Command(ctx context.Context, h inventory.Host, tty bool, cmd string) *exec.
 	}
 
 	c := exec.CommandContext(ctx, "ssh", args...)
-	// When ~/.ssh/config shares connections (ControlPersist), the background master
-	// keeps ssh's output open: don't wait for it once ssh itself has exited. Wait then
-	// returns exec.ErrWaitDelay.
+	// When ssh shares connections (Share, or the user's ControlPersist), the master a
+	// run starts goes on in the background, and may keep ssh's output open: don't wait
+	// for it once ssh itself has exited. Wait then returns exec.ErrWaitDelay.
 	c.WaitDelay = time.Second
 
 	return c
+}
+
+// Share has ssh share one connection per host between the probes, logs and
+// actions, rather than connect and log in for each. If the user's ssh config
+// sets how it shares them or it cannot create sockets, connections are not shared.
+func Share(ctx context.Context, hosts []inventory.Host) []inventory.Host {
+	dir := socketDir()
+	if dir == "" {
+		return hosts
+	}
+
+	// A connection lasts a minute past its last use: past the next probe, at the
+	// default refresh. Quoted, as a home can hold spaces.
+	opts := []string{"-o", "ControlMaster=auto", "-o", `ControlPath="` + dir + `/sshwarm-%C"`, "-o", "ControlPersist=60"}
+	hosts = slices.Clone(hosts)
+
+	var wg sync.WaitGroup
+
+	for i := range hosts {
+		wg.Go(func() {
+			if !shares(ctx, hosts[i]) {
+				hosts[i].Opts = slices.Concat(opts, hosts[i].Opts)
+			}
+		})
+	}
+
+	wg.Wait()
+
+	return hosts
+}
+
+// socketDir is where ssh can keep the sockets of shared connections: the
+// user's ~/.ssh, if it can be written to. Returns "" otherwise.
+func socketDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	dir := filepath.Join(home, ".ssh")
+	// too long for a MacOS socket path
+	if len(dir)+len("/sshwarm-")+40+17 > 104 {
+		return ""
+	}
+
+	f, err := os.CreateTemp(dir, ".sshwarm-*")
+	if err != nil {
+		return ""
+	}
+
+	_ = f.Close()
+	_ = os.Remove(f.Name()) // a leftover empty file is harmless
+
+	return dir
+}
+
+// shares says whether the user's ssh config already shares connections for a host.
+// Returns true if unable to determine.
+func shares(ctx context.Context, h inventory.Host) bool {
+	out, err := exec.CommandContext(ctx, "ssh", slices.Concat([]string{"-G"}, h.Opts, []string{"--", h.Address})...).Output()
+	if err != nil {
+		return true
+	}
+
+	for line := range strings.Lines(string(out)) {
+		k, v, _ := strings.Cut(strings.TrimSpace(line), " ")
+		if k == "controlpath" || k == "controlmaster" && v != "false" {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Run runs cmd on h to its end, without a time limit, and returns its output, stdout
