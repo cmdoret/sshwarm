@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cmdoret/sshwarm/internal/testutil"
 )
@@ -41,9 +42,14 @@ func TestHelpListsFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	flags, err := globalFlags(&options{}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	status, _ := statusFlags()
 
-	for help, fs := range map[string]*flag.FlagSet{global.String(): globalFlags(&options{}, os.Getenv), statusHelp: status} {
+	for help, fs := range map[string]*flag.FlagSet{global.String(): flags, statusHelp: status} {
 		fs.VisitAll(func(f *flag.Flag) {
 			if !strings.Contains(help, "--"+f.Name+" ") {
 				t.Errorf("--%s isn't in the help of %s", f.Name, fs.Name())
@@ -96,6 +102,68 @@ func TestStatus(t *testing.T) {
 
 	if len(machines) != 1 || machines[0].Name != "web" || machines[0].State != "degraded" {
 		t.Errorf("status --format json: %+v", machines)
+	}
+}
+
+// The machines come from a flag, which beats both variables, else a variable, else
+// the default hosts file. A hosts file and a flake given together are a mistake.
+func TestHostSource(t *testing.T) {
+	probe, err := filepath.Abs("internal/swarm/testdata/argiope.probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testutil.FakeBin(t, "ssh", `cat >/dev/null; cat "`+probe+`"`)
+	testutil.FakeBin(t, "nix", "echo the flake >&2; exit 1")
+
+	home, empty := t.TempDir(), t.TempDir()
+	config := filepath.Join(home, ".config")
+
+	hosts := filepath.Join(config, "sshwarm", "hosts.toml")
+	if err := os.MkdirAll(filepath.Dir(hosts), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(hosts, []byte("[[host]]\nname = \"web\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []struct {
+		env        map[string]string
+		args, want string // want is in stdout or stderr
+	}{
+		{map[string]string{"HOME": home}, "status", "web disk"},
+		{map[string]string{"XDG_CONFIG_HOME": config}, "status", "web disk"},
+		{map[string]string{"XDG_CONFIG_HOME": "relative", "HOME": home}, "status", "web disk"},
+		{map[string]string{"HOME": empty}, "status", "or write " + filepath.Join(empty, ".config", "sshwarm", "hosts.toml")},
+		{nil, "status", "or write $XDG_CONFIG_HOME/sshwarm/hosts.toml"},
+		{map[string]string{"SSHWARM_HOSTS": hosts}, "--flake . status", "the flake"},
+		{map[string]string{"SSHWARM_FLAKE": "."}, "--hosts " + hosts + " status", "web disk"},
+		{map[string]string{"SSHWARM_HOSTS": hosts, "SSHWARM_FLAKE": "."}, "status", "choose one"},
+		{nil, "--hosts " + hosts + " --flake . status", "choose one"},
+		{map[string]string{"SSHWARM_TIMEOUT": "soon"}, "status", `SSHWARM_TIMEOUT: time: invalid duration "soon"`},
+	} {
+		if _, out, errs := sshwarm(t, c.env, strings.Fields(c.args)...); !strings.Contains(out+errs, c.want) {
+			t.Errorf("%v sshwarm %s: no %q in stdout %q, stderr %q", c.env, c.args, c.want, out, errs)
+		}
+	}
+}
+
+// --timeout and --refresh beat their variables, which beat the defaults.
+func TestEnvDuration(t *testing.T) {
+	var opts options
+
+	fs, err := globalFlags(&opts, func(k string) string { return map[string]string{"SSHWARM_TIMEOUT": "5s"}[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fs.Parse([]string{"--refresh", "1m"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if opts.timeout != 5*time.Second || opts.refresh != time.Minute {
+		t.Errorf("timeout %v, refresh %v; want 5s, 1m", opts.timeout, opts.refresh)
 	}
 }
 
