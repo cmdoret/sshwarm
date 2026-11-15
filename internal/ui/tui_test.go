@@ -277,6 +277,46 @@ echo line-two
 	s.expect("machines 1", "enter open")
 }
 
+// ? lists the keys of the screen under it: its own, those that move around, and
+// those of every screen, once each; ? or esc goes back. The help line, however
+// narrow, says ? help.
+func TestHelpScreen(t *testing.T) {
+	r := fixture(t)
+	testutil.FakeBin(t, "ssh", `echo a log line`)
+
+	s := start(t, r)
+	s.resize(60)
+	s.expect("… • ? help")
+	s.resize(160)
+
+	s.keys("?")
+	s.expect("› help", "Here", "enter", "open", "describe", "Moving around", "sort on the state", "Anywhere", "go to: :ctr web", "quit, even while typing")
+
+	if v := s.m.View(); strings.Count(v, "quit") != 3 { // q, ^c, and the help line's q
+		t.Errorf("a key is listed twice, or missing:\n%s", v)
+	}
+
+	s.keys("?")
+	s.expect("machines 1")
+
+	// A unit's logs: the pager's keys, but f, which is fullscreen.
+	s.keys("enter")
+	s.logs("enter")
+	s.keys("?")
+	s.expect("follow", "search", "pgdn/space", "½ page down")
+
+	if strings.Contains(s.m.View(), "f/pgdn") {
+		t.Error("f listed as page down, but it's fullscreen")
+	}
+
+	s.keys("esc")
+	s.expect("a log line")
+
+	// While a search is typed, ? is typed too.
+	s.keys("/", "?")
+	s.expect("/?")
+}
+
 // / searches the logs as it's typed, ignoring case, and shows the newest match; n
 // and N go to older and newer ones, round past the ends. The lines wrap: the match
 // shown must still be on screen.
@@ -476,7 +516,6 @@ func TestSort(t *testing.T) {
 	down := swarm.Report{Host: inventory.Host{Name: "down"}, Err: errTest}
 
 	s := start(t, idle, r, down)
-	s.expect("⇧←→ column • O sort")
 
 	order := func(want ...string) {
 		t.Helper()

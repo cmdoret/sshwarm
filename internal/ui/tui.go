@@ -45,9 +45,10 @@ type screen interface {
 
 // frame is what a screen shows: its body in a box, with the title and the status on
 // its top edge, and its help below; or when full, the body alone, the whole window.
+// The help screen lists its help and the keys that move around it.
 type frame struct {
 	title, status, body string
-	help                []key.Binding
+	help, moves         []key.Binding
 	full                bool
 }
 
@@ -223,11 +224,25 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		return nil // nothing to open before the first probe
 	}
 
-	if key.Matches(k, keyGoTo) {
+	switch {
+	case key.Matches(k, keyGoTo):
 		return m.command.Focus()
+	case key.Matches(k, keyHelp):
+		return m.toggleHelp()
 	}
 
 	return m.top().update(m, k)
+}
+
+// toggleHelp opens the help screen over the screen on top, or closes it.
+func (m *model) toggleHelp() tea.Cmd {
+	if _, ok := m.top().(*helpScreen); ok {
+		m.pop()
+
+		return nil
+	}
+
+	return m.push(newHelp(m.top().view(m)))
 }
 
 // confirmKey runs the action asked for on y, in the background; any other key
@@ -426,10 +441,22 @@ func (m *model) draw(f frame) string {
 	b.WriteString(dimStyle.Render("╰"+strings.Repeat("─", inner)+"╯") + "\n")
 
 	if bar == "" {
-		bar = helpLine(f.help)
+		bar = helpBar(f.help, m.width)
 	}
 
 	return b.String() + bar
+}
+
+// helpBar is a screen's help line, cut to width but for its last key, ? help, which
+// says where the rest is.
+func helpBar(keys []key.Binding, width int) string {
+	if len(keys) < 2 {
+		return helpLine(keys)
+	}
+
+	last := dimStyle.Render(" • ") + helpLine(keys[len(keys)-1:])
+
+	return ansi.Truncate(helpLine(keys[:len(keys)-1]), max(width-ansi.StringWidth(last), 0), "…") + last
 }
 
 // crumbs is a screen's title: sshwarm, then where the screen is, as in
