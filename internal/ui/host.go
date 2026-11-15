@@ -177,7 +177,7 @@ func (h *host) view(m *model) frame {
 		return frame{
 			title: h.title(m), status: m.refreshStatus(),
 			body: toneStyles[bad].Render("down: " + m.reports[h.machine].Err.Error()),
-			help: []key.Binding{keyRefresh, keyBack, keyQuit},
+			help: []key.Binding{keyRefresh, keyBack},
 		}
 	}
 
@@ -211,7 +211,7 @@ func (h *host) view(m *model) frame {
 	return frame{
 		title: h.title(m), status: m.refreshStatus(),
 		body: tabs.String() + h.filterView() + "\n" + h.grid.view(),
-		help: append(help, keyTab, keyFilter, keyGoTo, keyBack, keyQuit),
+		help: append(help, keyTab, keyFilter, keyBack), moves: gridMoves,
 	}
 }
 

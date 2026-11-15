@@ -60,7 +60,8 @@ type output struct {
 
 func newOutput(title string, h inventory.Host, cmd string, card cardFunc) *output {
 	o := &output{title: title, host: h, cmd: cmd, card: card, wrap: true, pager: viewport.New(0, 0), find: newFinder()}
-	o.pager.SetHorizontalStep(8) // left and right, over a card or unwrapped lines
+	o.pager.SetHorizontalStep(8)                                             // left and right, over a card or unwrapped lines
+	o.pager.KeyMap.PageDown = bind("pgdn/space", "page down", "pgdown", " ") // f is fullscreen
 
 	return o
 }
@@ -287,7 +288,7 @@ func (o *output) key(m *model, k tea.KeyMsg) tea.Cmd {
 
 func (o *output) view(m *model) frame {
 	if o.full {
-		return frame{body: o.pager.View(), full: true}
+		return frame{body: o.pager.View(), full: true, help: o.help(), moves: o.moves()}
 	}
 
 	title := crumbs(o.host.Name, o.title) + o.find.view()
@@ -305,6 +306,12 @@ func (o *output) view(m *model) frame {
 		status = when + dimStyle.Render(" · ") + status
 	}
 
+	return frame{title: title, status: status, body: o.pager.View(), help: o.help(), moves: o.moves()}
+}
+
+// help is the screen's keys, for the help line: those that change what it shows,
+// then the others.
+func (o *output) help() []key.Binding {
 	var help []key.Binding
 
 	switch {
@@ -331,9 +338,15 @@ func (o *output) view(m *model) frame {
 		help = append(help, keyWrap)
 	}
 
-	help = append(help, keyFull, keyCopy, keyTopBottom, keyRefresh, keyBack, keyQuit)
+	return append(help, keyFull, keyCopy, keyRefresh, keyBack)
+}
 
-	return frame{title: title, status: status, body: o.pager.View(), help: help}
+// moves are the keys that move around the output, for the help screen: the pager's,
+// and those the screen takes before it.
+func (o *output) moves() []key.Binding {
+	km := o.pager.KeyMap
+
+	return []key.Binding{km.Up, km.Down, km.PageUp, km.PageDown, km.HalfPageUp, km.HalfPageDown, keyTop, keyBottom, km.Left, km.Right}
 }
 
 // redescribeMsg asks a description's screen to run again, unless it's closed or ran

@@ -184,18 +184,14 @@ func (l *list) show(m *model, p *pick, command func(swarm.Report, string) (strin
 	return m.push(newOutput(title, p.r.Host, cmd, card))
 }
 
-// help is the list's keys, for the help line: its kind's, then the grid's.
+// help is the list's keys, for the help line: its kind's, then its actions'.
 func (l *list) help(m *model) []key.Binding {
 	help := slices.Clone(l.kind.keys)
 	if !m.readOnly {
 		help = append(help, l.kind.actionKeys...)
 	}
 
-	if l.grid.hidden() > 0 {
-		help = append(help, keyScroll)
-	}
-
-	return append(help, keyColumn, keySort)
+	return help
 }
 
 // filterView is the filter, for after the title, while it's typed or set.
