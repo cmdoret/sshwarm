@@ -34,7 +34,7 @@ type row struct {
 	tone    tone
 	key     string // what the row is about: a machine, unit, stack or container name
 	owner   string // what that belongs to: a container's stack
-	machine int    // in a list of every machine's rows: its machine's index in the reports
+	machine int    // its machine's index in the reports
 }
 
 // grid is a scrolling table with one selected row, and one selected column to sort

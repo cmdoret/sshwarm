@@ -2,13 +2,10 @@ package ui
 
 import (
 	"fmt"
-	"slices"
 
 	"github.com/charmbracelet/bubbles/key"
 
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/cmdoret/sshwarm/internal/swarm"
 )
 
 // fleet is the bottom screen: a row per machine. Enter opens a machine's screen.
@@ -25,8 +22,11 @@ func (f *fleet) open(m *model) tea.Cmd {
 // fill lists the machines.
 func (f *fleet) fill(m *model) {
 	var rows []row
-	for _, r := range m.reports {
-		rows = append(rows, machineRow(r))
+
+	for i, r := range m.reports {
+		rw := machineRow(r)
+		rw.machine = i
+		rows = append(rows, rw)
 	}
 
 	f.load(rows)
@@ -60,18 +60,6 @@ func (f *fleet) key(m *model, k tea.KeyMsg) tea.Cmd {
 	}
 
 	return nil
-}
-
-// pick is the machine under the cursor, if any.
-func (f *fleet) pick(m *model) *pick {
-	key, ok := f.grid.selected()
-	if !ok {
-		return nil
-	}
-
-	i := slices.IndexFunc(m.reports, func(r swarm.Report) bool { return r.Host.Name == key })
-
-	return &pick{machine: i, r: m.reports[i], key: key}
 }
 
 func (f *fleet) resize(width, height int) {

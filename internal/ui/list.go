@@ -41,14 +41,11 @@ func (l *list) titles() []string {
 	return slices.Insert(slices.Clone(l.kind.titles), 1, "MACHINE")
 }
 
-// column is where the list shows its kind's column c: one further past the first
-// if it lists every machine's rows.
-func (l *list) column(c int) int {
-	if l.every && c > 0 {
-		return c + 1
+// sortOn sorts the rows on the column titled title.
+func (l *list) sortOn(title string) {
+	if i := slices.Index(l.grid.titles, title); i >= 0 {
+		l.grid.sortOn(i)
 	}
-
-	return c
 }
 
 // pick is the row under the cursor: its key, and its machine's report and index.
@@ -56,6 +53,20 @@ type pick struct {
 	machine int
 	r       swarm.Report
 	key     string
+}
+
+// pick is the row under the cursor, if any: on its machine, by its own name. No
+// name holds a "/": in a list of every machine's rows, what's before the first is
+// the machine's.
+func (l *list) pick(m *model) *pick {
+	if _, ok := l.grid.selected(); !ok {
+		return nil
+	}
+
+	rw := l.grid.rows[l.grid.cursor]
+	r := m.reports[rw.machine]
+
+	return &pick{machine: rw.machine, r: r, key: strings.TrimPrefix(rw.key, r.Host.Name+"/")}
 }
 
 // load shows rows: those whose key contains the filter, ignoring case.
@@ -112,11 +123,9 @@ func (l *list) key(m *model, k tea.KeyMsg, p *pick) tea.Cmd {
 	case key.Matches(k, keySortName):
 		l.grid.sortOn(0)
 	case key.Matches(k, keySortStat):
-		l.grid.sortOn(l.column(l.kind.status))
+		l.sortOn(l.kind.status)
 	case key.Matches(k, keySortAge):
-		if l.kind.age > 0 {
-			l.grid.sortOn(l.column(l.kind.age))
-		}
+		l.sortOn(l.kind.age)
 	default:
 		l.grid.key(k)
 	}

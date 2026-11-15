@@ -20,7 +20,7 @@ type kind struct {
 	drill *kind                                                // what enter opens on a row, of that row only; nil: its logs
 	logs  func(r swarm.Report, key string) (title, cmd string) // nil: no logs
 
-	status, age int // the columns S and A sort on; 0 (the name) for none
+	status, age string // the titles of the columns S and A sort on
 
 	describe func(r swarm.Report, key string) (title, cmd string) // nil: nothing to describe
 	card     cardFunc                                             // draws describe's output
@@ -93,8 +93,8 @@ var machines = &kind{
 	names:    []string{"machines"},
 	keys:     []key.Binding{as(keyEnter, "open"), keyDescribe},
 	titles:   machineTitles,
-	status:   1,
-	age:      2, // DEPLOY: what changed last, as services' AGE
+	status:   "STATE",
+	age:      "DEPLOY", // what changed last, as services' AGE
 	shell:    func(swarm.Report, string) string { return "" },
 	describe: func(swarm.Report, string) (string, string) { return "describe", swarm.DescribeMachine() },
 	card:     machineCard,
@@ -112,8 +112,8 @@ var services = &kind{
 	names:  []string{"services", "svc"},
 	keys:   []key.Binding{as(keyEnter, "logs"), keyDescribe},
 	titles: []string{"UNIT", "ACTIVE", "SUB", "RESULT", "RESTARTS", "AGE", "DESCRIPTION"},
-	status: 1,
-	age:    5,
+	status: "ACTIVE",
+	age:    "AGE",
 	rows:   func(r swarm.Report, s scope) []row { return serviceRows(r, s.all) },
 	logs:   func(_ swarm.Report, unit string) (string, string) { return unit, swarm.UnitLogs(unit) },
 	describe: func(_ swarm.Report, unit string) (string, string) {
@@ -132,8 +132,8 @@ var stacks = &kind{
 	names:  []string{"stacks", "st"},
 	keys:   []key.Binding{as(keyEnter, "containers"), keyLogs, keyDescribe},
 	titles: []string{"STACK", "OK", "AGE", "PROBLEMS"},
-	status: 1,
-	age:    2, // its youngest container's: the time since anything in it started or stopped
+	status: "OK",
+	age:    "AGE", // its youngest container's: the time since anything in it started or stopped
 	rows: func(r swarm.Report, _ scope) []row {
 		var rows []row
 		for _, s := range r.Stacks {
@@ -163,8 +163,8 @@ var containers = &kind{
 	names:  []string{"containers", "ctr"},
 	keys:   []key.Binding{as(keyEnter, "logs"), keyDescribe, keyOwner},
 	titles: []string{"CONTAINER", "STACK", "STATE", "RESTARTS", "AGE", "STATUS"},
-	status: 2,
-	age:    4, // the time since it last started or stopped, as services' AGE
+	status: "STATE",
+	age:    "AGE", // the time since it last started or stopped, as services' AGE
 	rows: func(r swarm.Report, sc scope) []row {
 		var rows []row
 

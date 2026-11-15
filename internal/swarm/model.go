@@ -1,6 +1,7 @@
 package swarm
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -102,6 +103,9 @@ func (u Unit) Condition() Condition {
 	return Idle
 }
 
+// JustRestarted says whether u is a warning for having just restarted on its own.
+func (u Unit) JustRestarted() bool { return u.RecentRestart && u.Condition() == Warning }
+
 // Interesting says whether u is worth watching: broken, just restarted on its own,
 // or enabled to run. The rest are static or inactive units: hundreds of them,
 // rarely of interest.
@@ -175,6 +179,23 @@ func (c Container) Condition() Condition {
 	return Broken
 }
 
+// JustRestarted says whether c is a warning for having just restarted on its own,
+// which its status, "Up 40 seconds", wouldn't tell.
+func (c Container) JustRestarted() bool { return c.RecentRestart && c.Condition() == Warning }
+
+// Trouble words what's wrong with c, after its name: that it just restarted on its
+// own, or else its status, or its state if docker didn't word one; "" if it's fine.
+func (c Container) Trouble() string {
+	switch {
+	case c.JustRestarted():
+		return fmt.Sprintf("restarted ×%d", c.Restarts)
+	case c.Condition() == Fine:
+		return ""
+	}
+
+	return cmp.Or(c.Status, c.State)
+}
+
 // Condition is the worst of s's containers' conditions.
 func (s Stack) Condition() Condition {
 	worst := Fine
@@ -240,7 +261,7 @@ func (r Report) Problems() []string {
 	var restarted []string
 
 	for _, u := range r.Units {
-		if u.RecentRestart && u.Condition() == Warning {
+		if u.JustRestarted() {
 			restarted = append(restarted, fmt.Sprintf("%s ×%d", u.Name, u.Restarts))
 		}
 	}
@@ -254,8 +275,8 @@ func (r Report) Problems() []string {
 			switch {
 			case c.Condition() == Broken:
 				out = append(out, "stack "+s.Name+": "+c.Name+" "+c.State+" ("+c.Status+")")
-			case c.RecentRestart && c.Condition() == Warning:
-				out = append(out, fmt.Sprintf("stack %s: %s restarted ×%d", s.Name, c.Name, c.Restarts))
+			case c.JustRestarted():
+				out = append(out, "stack "+s.Name+": "+c.Name+" "+c.Trouble())
 			}
 		}
 	}
