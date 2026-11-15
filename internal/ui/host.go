@@ -37,7 +37,12 @@ func (h *host) fill(m *model) { h.load(h.rowsOf(m, h.kind, scope{all: m.all, sta
 // pick undoes: rows of different machines can have the same name.
 func (h *host) rowsOf(m *model, k *kind, sc scope) []row {
 	if !h.every {
-		return k.rows(m.reports[h.machine], sc)
+		rows := k.rows(m.reports[h.machine], sc)
+		for i := range rows {
+			rows[i].machine = h.machine
+		}
+
+		return rows
 	}
 
 	var rows []row
@@ -103,23 +108,6 @@ func (h *host) key(m *model, k tea.KeyMsg) tea.Cmd {
 	}
 
 	return nil
-}
-
-// pick is the row under the cursor, if any: on its own machine, by its own name.
-func (h *host) pick(m *model) *pick {
-	key, ok := h.grid.selected()
-	if !ok {
-		return nil
-	}
-
-	if !h.every {
-		return &pick{machine: h.machine, r: m.reports[h.machine], key: key}
-	}
-
-	i := h.grid.rows[h.grid.cursor].machine
-	r := m.reports[i]
-
-	return &pick{machine: i, r: r, key: strings.TrimPrefix(key, r.Host.Name+"/")}
 }
 
 // tabs are the kinds the screen has a tab for: its machine's, or every machine's,

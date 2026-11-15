@@ -3,15 +3,12 @@ package ui
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -57,19 +54,12 @@ type output struct {
 	raw                bool      // shows a description's output as it came, not its card
 	follow, wrap, full bool      // full: no frame or help line
 	pager              viewport.Model
-	shown              string // what the pager shows, unwrapped; "" while loading: what c copies
-
-	search  textinput.Model // what / looks for in the lines, ignoring case
-	pattern *regexp.Regexp  // the search, nil if none
-	hits    []int           // the lines it matches, in order
-	match   int             // the line of the match shown, -1 if none
+	rows               []string // what the pager shows, a card's lines or the output's, unwrapped; nil while loading: what c copies
+	find               finder
 }
 
 func newOutput(title string, h inventory.Host, cmd string, card cardFunc) *output {
-	s := textinput.New()
-	s.Prompt = "/"
-
-	o := &output{title: title, host: h, cmd: cmd, card: card, wrap: true, pager: viewport.New(0, 0), search: s, match: -1}
+	o := &output{title: title, host: h, cmd: cmd, card: card, wrap: true, pager: viewport.New(0, 0), find: newFinder()}
 	o.pager.SetHorizontalStep(8) // left and right, over a card or unwrapped lines
 
 	return o
@@ -87,7 +77,7 @@ func (o *output) start(ctx context.Context, follow bool) tea.Cmd {
 	o.runs++
 
 	if !again {
-		o.shown, o.match = "", -1
+		o.rows, o.find.match = nil, -1
 		o.pager.SetContent("loading…")
 	}
 
@@ -111,7 +101,7 @@ func (o *output) add(msg logLinesMsg) tea.Cmd {
 
 	o.lines = append(o.lines, msg.lines...)
 	if cut := len(o.lines) - maxLogLines; cut > 0 {
-		o.lines, o.match = o.lines[cut:], o.match-cut // the match shown moves up with its line
+		o.lines, o.find.match = o.lines[cut:], o.find.match-cut // the match shown moves up with its line
 	}
 
 	if msg.done && o.follow {
@@ -136,24 +126,29 @@ func (o *output) add(msg logLinesMsg) tea.Cmd {
 }
 
 // setContent draws a description's card once all its output is in, or else shows
-// the output as it came, its long lines wrapped to the window unless wrapping is
-// off (wraps). Lines wider than the window, a card's or unwrapped, scroll left and
-// right.
+// the output as it came, and notes what the search matches in either.
 func (o *output) setContent() {
 	if o.showsCard() && o.ch != nil {
 		return // still "loading…", or the last card: not the next one's partial output
 	}
 
-	o.shown = strings.Join(o.lines, "\n")
-	lines := o.lines
+	o.rows = o.lines
 
 	if o.showsCard() {
-		if drawn, err := o.card(o.shown); err == nil {
-			o.shown, lines = drawn, strings.Split(drawn, "\n")
+		if drawn, err := o.card(strings.Join(o.lines, "\n")); err == nil {
+			o.rows = strings.Split(drawn, "\n")
 		}
 	}
 
-	content := o.highlighted(lines)
+	o.find.scan(o.rows)
+	o.render()
+}
+
+// render puts the rows in the pager, with what the search found highlighted, their
+// long lines wrapped to the window unless wrapping is off (wraps). Lines wider than
+// the window, a card's or unwrapped, scroll left and right.
+func (o *output) render() {
+	content := strings.Join(o.find.highlight(o.rows), "\n")
 	if o.wraps() {
 		content = o.wrapped(content)
 	}
@@ -168,97 +163,34 @@ func (o *output) wraps() bool { return o.wrap && !o.showsCard() }
 // wrapped wraps s's lines to the window.
 func (o *output) wrapped(s string) string { return lipgloss.NewStyle().Width(o.pager.Width).Render(s) }
 
-// highlighted is lines, those shown, with what the search found highlighted and the
-// match shown as a pill. It notes the lines that match in hits.
-func (o *output) highlighted(lines []string) string {
-	o.hits = nil
-	if o.pattern == nil {
-		return o.shown
+// showMatch shows the search's match, as a pill, a third down the window: what led
+// to it above, what followed below.
+func (o *output) showMatch() {
+	o.render()
+
+	if o.find.match >= 0 {
+		o.pager.SetYOffset(o.offset(o.find.match) - o.pager.Height/3)
 	}
-
-	lines = slices.Clone(lines)
-
-	for i, line := range lines {
-		// A card's line loses its colors, so that what's found stands out alone.
-		plain := ansi.Strip(line)
-		if !o.pattern.MatchString(plain) {
-			continue
-		}
-
-		o.hits = append(o.hits, i)
-
-		st := matchStyle
-		if i == o.match {
-			st = pillStyle
-		}
-
-		lines[i] = o.pattern.ReplaceAllStringFunc(plain, func(s string) string { return st.Render(s) })
-	}
-
-	return strings.Join(lines, "\n")
 }
 
-// find searches the lines for what's typed, ignoring case, and shows the newest
-// match: logs are read from their end.
-func (o *output) find() {
-	o.pattern, o.match = nil, -1
-	if q := o.search.Value(); q != "" {
-		o.pattern = regexp.MustCompile("(?i)" + regexp.QuoteMeta(q))
-	}
-
-	o.setContent()
-	o.step(-1)
-}
-
-// step shows the next match, in an older line with dir -1 or in a newer one with
-// 1, round past the oldest and the newest; the newest without one shown.
-func (o *output) step(dir int) {
-	if len(o.hits) == 0 {
-		return
-	}
-
-	i := slices.Index(o.hits, o.match)
-	if i < 0 {
-		i = len(o.hits) - 1
-	} else {
-		i = (i + dir + len(o.hits)) % len(o.hits)
-	}
-
-	o.match = o.hits[i]
-	o.setContent() // the match shown becomes the pill
-
-	// A third down the window: what led to it shows above, what followed below.
-	o.pager.SetYOffset(o.offset(o.match) - o.pager.Height/3)
-}
-
-// offset is the pager's line where line i of those shown starts: past the lines
-// before it, as wrapped.
+// offset is the pager's line where row i starts: past the rows before it, as
+// wrapped.
 func (o *output) offset(i int) int {
 	if !o.wraps() || i == 0 {
 		return i
 	}
 
-	return lipgloss.Height(o.wrapped(strings.Join(o.lines[:i], "\n")))
+	return lipgloss.Height(o.wrapped(strings.Join(o.rows[:i], "\n")))
 }
 
-// searchKey types the search, which shows its matches as it's typed: enter keeps
-// it, esc drops it.
+// searchKey types the search, which shows its newest match as it's typed.
 func (o *output) searchKey(k tea.KeyMsg) tea.Cmd {
-	var cmd tea.Cmd
-
-	switch {
-	case key.Matches(k, keyBack):
-		o.search.SetValue("")
-		o.search.Blur()
-	case key.Matches(k, keyEnter):
-		o.search.Blur()
-
-		return nil
-	default:
-		o.search, cmd = o.search.Update(k)
+	changed, cmd := o.find.key(k)
+	if changed {
+		o.find.scan(o.rows)
+		o.find.step(-1)
+		o.showMatch()
 	}
-
-	o.find()
 
 	return cmd
 }
@@ -297,10 +229,10 @@ func (o *output) update(m *model, msg tea.Msg) tea.Cmd {
 
 func (o *output) close()       { o.stop() }
 func (o *output) busy() bool   { return o.card != nil && o.ch != nil } // describing
-func (o *output) typing() bool { return o.search.Focused() }
+func (o *output) typing() bool { return o.find.input.Focused() }
 
 func (o *output) key(m *model, k tea.KeyMsg) tea.Cmd {
-	if o.search.Focused() {
+	if o.find.input.Focused() {
 		return o.searchKey(k)
 	}
 
@@ -308,11 +240,15 @@ func (o *output) key(m *model, k tea.KeyMsg) tea.Cmd {
 
 	switch {
 	case key.Matches(k, keyFilter):
-		return o.search.Focus()
+		return o.find.input.Focus()
 	case key.Matches(k, keyOlder):
-		o.step(-1)
+		if o.find.step(-1) {
+			o.showMatch()
+		}
 	case key.Matches(k, keyNewer):
-		o.step(1)
+		if o.find.step(1) {
+			o.showMatch()
+		}
 	case key.Matches(k, keyBack):
 		m.pop()
 	case key.Matches(k, keyRefresh): // runs the command again: a description's latest state, or the latest logs
@@ -323,7 +259,7 @@ func (o *output) key(m *model, k tea.KeyMsg) tea.Cmd {
 		}
 	case key.Matches(k, keyRaw):
 		if o.card != nil {
-			o.raw, o.match = !o.raw, -1 // other lines: the match shown isn't there
+			o.raw, o.find.match = !o.raw, -1 // other lines: the match shown isn't there
 			o.setContent()
 			o.pager.GotoTop()
 		}
@@ -354,14 +290,11 @@ func (o *output) view(m *model) frame {
 		return frame{body: o.pager.View(), full: true}
 	}
 
-	title := crumbs(o.host.Name, o.title)
-	if o.search.Focused() || o.search.Value() != "" {
-		title += " " + o.search.View()
-	}
+	title := crumbs(o.host.Name, o.title) + o.find.view()
 
 	status := dimStyle.Render(fmt.Sprintf("%3.f%%", o.pager.ScrollPercent()*100))
-	if o.pattern != nil {
-		status = o.matchStatus() + dimStyle.Render(" · ") + status
+	if found := o.find.status(); found != "" {
+		status = found + dimStyle.Render(" · ") + status
 	}
 	if o.card != nil && !o.refreshed.IsZero() { // a description refreshes: say how fresh it is
 		when := dimStyle.Render("refreshed " + o.refreshed.Format(time.TimeOnly))
@@ -388,9 +321,9 @@ func (o *output) view(m *model) frame {
 	help = append(help, as(keyFilter, "search"))
 
 	switch {
-	case len(o.hits) > 0 && o.showsCard():
+	case len(o.find.hits) > 0 && o.showsCard():
 		help = append(help, as(keyMatch, "up/down")) // a card has no older and newer lines
-	case len(o.hits) > 0:
+	case len(o.find.hits) > 0:
 		help = append(help, keyMatch)
 	}
 
@@ -401,19 +334,6 @@ func (o *output) view(m *model) frame {
 	help = append(help, keyFull, keyCopy, keyTopBottom, keyRefresh, keyBack, keyQuit)
 
 	return frame{title: title, status: status, body: o.pager.View(), help: help}
-}
-
-// matchStatus says which of the search's matches is shown, of how many: "2/5".
-func (o *output) matchStatus() string {
-	if len(o.hits) == 0 {
-		return toneStyles[warn].Render("no match")
-	}
-
-	if i := slices.Index(o.hits, o.match); i >= 0 {
-		return dimStyle.Render(fmt.Sprintf("%d/%d", i+1, len(o.hits)))
-	}
-
-	return dimStyle.Render(fmt.Sprintf("%d matches", len(o.hits)))
 }
 
 // redescribeMsg asks a description's screen to run again, unless it's closed or ran
@@ -434,11 +354,11 @@ func (o *output) again(after time.Duration) tea.Cmd {
 // the output it hides, or the output's lines as they came, not as wrapped. It says
 // what it did.
 func (o *output) copyShown() string {
-	if o.shown == "" {
+	if o.rows == nil {
 		return "nothing to copy"
 	}
 
-	s := ansi.Strip(o.shown)
+	s := ansi.Strip(strings.Join(o.rows, "\n"))
 	copyText(s)
 
 	return fmt.Sprintf("copied %d lines", strings.Count(s, "\n")+1)
