@@ -47,6 +47,11 @@ run `systemctl` with passwordless sudo.
 sshwarm --hosts hosts.toml
 ```
 
+Machines behave like namespaces in k9s:
+
+* `:` goes to a table: `:ctr web` lists the containers of the machine `web`.
+`:ctr all` (or `:ctr` from the machines) those of every machine, same with `:svc` and `:st`.
+
 ### Hosts file
 
 Only `name` is required. ssh looks up `host`, or else `name`, in `~/.ssh/config` for

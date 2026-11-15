@@ -14,7 +14,7 @@ import (
 // fleet is the bottom screen: a row per machine. Enter opens a machine's screen.
 type fleet struct{ list }
 
-func newFleet() *fleet { return &fleet{newList(machines)} }
+func newFleet() *fleet { return &fleet{newList(machines, false)} }
 
 func (f *fleet) open(m *model) tea.Cmd {
 	f.fill(m)

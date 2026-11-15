@@ -16,15 +16,39 @@ import (
 // sorted and scrolled, and the keys that act on the row under the cursor.
 type list struct {
 	kind   *kind
+	every  bool            // every machine's rows, with a MACHINE column after the first
 	filter textinput.Model // on the rows' keys
 	grid   grid
 }
 
-func newList(k *kind) list {
+func newList(k *kind, every bool) list {
 	f := textinput.New()
 	f.Prompt = "/"
 
-	return list{kind: k, filter: f, grid: grid{titles: k.titles}}
+	l := list{kind: k, every: every, filter: f}
+	l.grid = grid{titles: l.titles()}
+
+	return l
+}
+
+// titles head the list's columns: its kind's, and MACHINE after the first if it
+// lists every machine's rows.
+func (l *list) titles() []string {
+	if !l.every {
+		return l.kind.titles
+	}
+
+	return slices.Insert(slices.Clone(l.kind.titles), 1, "MACHINE")
+}
+
+// column is where the list shows its kind's column c: one further past the first
+// if it lists every machine's rows.
+func (l *list) column(c int) int {
+	if l.every && c > 0 {
+		return c + 1
+	}
+
+	return c
 }
 
 // pick is the row under the cursor: its key, and its machine's report and index.
@@ -88,10 +112,10 @@ func (l *list) key(m *model, k tea.KeyMsg, p *pick) tea.Cmd {
 	case key.Matches(k, keySortName):
 		l.grid.sortOn(0)
 	case key.Matches(k, keySortStat):
-		l.grid.sortOn(l.kind.status)
+		l.grid.sortOn(l.column(l.kind.status))
 	case key.Matches(k, keySortAge):
 		if l.kind.age > 0 {
-			l.grid.sortOn(l.kind.age)
+			l.grid.sortOn(l.column(l.kind.age))
 		}
 	default:
 		l.grid.key(k)
