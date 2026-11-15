@@ -90,7 +90,14 @@ func unitRow(r swarm.Report, u swarm.Unit) row {
 	}
 
 	state := toneOf(u.Condition())
-	line := row{key: u.Name, cells: []cell{dot(state, u.Name), {text: u.Active, tone: state, rank: float64(state)}, {text: u.Sub}, result, age, {text: u.Description}}}
+	line := row{key: u.Name, cells: []cell{
+		dot(state, u.Name),
+		{text: u.Active, tone: state, rank: float64(state)},
+		{text: u.Sub},
+		result,
+		restartsCell(u.Restarts, u.RecentRestart), age,
+		{text: u.Description},
+	}}
 
 	if state == bad || state == dim { // the whole row: failed stands out, inactive fades
 		line.tone = state
@@ -119,7 +126,10 @@ func stackRow(r swarm.Report, s swarm.Stack) row {
 	var problems []string
 
 	for _, c := range s.Containers {
-		if c.Condition() != swarm.Fine {
+		switch {
+		case c.RecentRestart && c.Condition() == swarm.Warning: // its status would read fine: "Up 40 seconds"
+			problems = append(problems, fmt.Sprintf("%s restarted ×%d", c.Name, c.Restarts))
+		case c.Condition() != swarm.Fine:
 			problems = append(problems, c.Name+" "+c.Status)
 		}
 	}
@@ -138,7 +148,11 @@ func stackRow(r swarm.Report, s swarm.Stack) row {
 func containerRow(r swarm.Report, stack string, c swarm.Container) row {
 	t := toneOf(c.Condition())
 	line := row{key: c.Name, owner: stack, cells: []cell{
-		dot(t, c.Name), {text: stack}, {text: c.State, tone: t, rank: float64(t)}, ageCell(r, c.Since), {text: c.Status},
+		dot(t, c.Name),
+		{text: stack},
+		{text: c.State, tone: t, rank: float64(t)},
+		restartsCell(c.Restarts, c.RecentRestart), ageCell(r, c.Since),
+		{text: c.Status},
 	}}
 
 	if t == bad {
@@ -146,6 +160,17 @@ func containerRow(r swarm.Report, stack string, c swarm.Container) row {
 	}
 
 	return line
+}
+
+// restartsCell counts automatic restarts, sorting on them: a warning while the last
+// is recent, as it stays all through a crash loop.
+func restartsCell(n int, recent bool) cell {
+	c := cell{text: strconv.Itoa(n), rank: float64(n)}
+	if recent {
+		c.tone = warn
+	}
+
+	return c
 }
 
 // short formats a duration as its largest unit: 45s, 12m, 5h, 3d.

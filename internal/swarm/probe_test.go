@@ -110,7 +110,7 @@ func TestStateFormat(t *testing.T) {
 func TestMisread(t *testing.T) {
 	r, err := Parse("### meta\nnow=1\n### units\nId=web.service\n\nnot a unit\n\n" +
 		"### containers\nweb\tweb-1\trunning\tUp\nweb web-2 running\n\n" +
-		"### states\n/web-1 0001-01-01T00:00:00Z 0001-01-01T00:00:00Z 0 -\n/web-2 yesterday\n")
+		"### states\n/web-1 0001-01-01T00:00:00Z 0001-01-01T00:00:00Z 0 0 -\n/web-2 yesterday\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,6 +118,44 @@ func TestMisread(t *testing.T) {
 	want := []string{"containers: 1 unreadable lines", "states: 1 unreadable lines", "units: 1 unreadable lines"}
 	if !slices.Equal(r.Errors, want) || len(r.Units) != 1 || len(r.Stacks) != 1 {
 		t.Errorf("errors %q, want %q; units %v, stacks %v", r.Errors, want, r.Units, r.Stacks)
+	}
+}
+
+// Automatic restarts are counted; the last one, if recent on the host's clock, is a
+// warning and a problem, as a crash loop between its crashes. A failed unit is
+// failed, whatever its restarts. now is 10000, 5 minutes after 9700.
+func TestRestarts(t *testing.T) {
+	r, err := Parse("### meta\nnow=10000\n### units\n" +
+		"Id=web.service\nActiveState=active\nUnitFileState=static\nNRestarts=3\nActiveEnterTimestamp=@9700\n\n" +
+		"Id=db.service\nActiveState=active\nNRestarts=1\nActiveEnterTimestamp=@1000\n\n" +
+		"Id=cron.service\nActiveState=failed\nNRestarts=5\nActiveEnterTimestamp=@9900\n" +
+		"### containers\napp\tapp-1\trunning\tUp 40 seconds\napp\tapp-2\trunning\tUp 3 hours\n" +
+		"### states\n/app-1 1970-01-01T02:46:00Z 0001-01-01T00:00:00Z 0 7 -\n/app-2 1970-01-01T00:16:40Z 0001-01-01T00:00:00Z 0 1 -\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, u := range r.Units {
+		want := map[string]Condition{"web.service": Warning, "db.service": Fine, "cron.service": Broken}[u.Name]
+		if u.Condition() != want {
+			t.Errorf("%s, %d restarts, recent %v: %v, want %v", u.Name, u.Restarts, u.RecentRestart, u.Condition(), want)
+		}
+	}
+
+	if !r.Units[0].Interesting() {
+		t.Error("a static unit that just restarted isn't listed")
+	}
+
+	for _, c := range r.Stacks[0].Containers {
+		want := map[string]Condition{"app-1": Warning, "app-2": Fine}[c.Name]
+		if c.Condition() != want {
+			t.Errorf("%s, %d restarts, recent %v: %v, want %v", c.Name, c.Restarts, c.RecentRestart, c.Condition(), want)
+		}
+	}
+
+	want := []string{"failed: cron.service", "restarted: web.service ×3", "stack app: app-1 restarted ×7"}
+	if got := r.Problems(); !slices.Equal(got, want) {
+		t.Errorf("problems %q, want %q", got, want)
 	}
 }
 

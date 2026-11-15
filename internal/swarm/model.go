@@ -39,15 +39,31 @@ type Unit struct {
 	Name, Active, Sub, Description string
 	Result, UnitFileState          string
 	Since                          time.Time // last state change; zero if never
+	Restarts                       int       // by systemd (Restart=), since it was last started by hand
+	RecentRestart                  bool      // the last of them was less than restartWindow ago
 }
 
 // Container is one container of a compose stack.
 type Container struct {
-	Name, State string    // State: running, exited, created...
-	Status      string    // as docker words it, e.g. "Up 2 hours (healthy)"; "" if unknown
-	Health      string    // its healthcheck's: healthy, unhealthy or starting; "" without one
-	ExitCode    int       // its last exit's
-	Since       time.Time // when it last started or stopped; zero if never, or unknown
+	Name, State   string    // State: running, exited, created...
+	Status        string    // as docker words it, e.g. "Up 2 hours (healthy)"; "" if unknown
+	Health        string    // its healthcheck's: healthy, unhealthy or starting; "" without one
+	ExitCode      int       // its last exit's
+	Since         time.Time // when it last started or stopped; zero if never, or unknown
+	Restarts      int       // by docker (its restart policy), since it was last started by hand
+	RecentRestart bool      // the last of them was less than restartWindow ago
+}
+
+// restartWindow is how long an automatic restart keeps what restarted a warning:
+// long enough to catch a crash loop between two crashes, which docker spaces up to
+// a minute apart, but short enough that a single crash doesn't stay one.
+const restartWindow = 10 * time.Minute
+
+// restartedRecently says whether something that restarted automatically, restarts
+// times, the last at started, did so less than restartWindow before now. Both
+// times are the host's; a zero now is unknown.
+func restartedRecently(restarts int, started, now time.Time) bool {
+	return restarts > 0 && !now.IsZero() && now.Sub(started) < restartWindow
 }
 
 // Stack is a compose project and its containers.
@@ -63,12 +79,12 @@ type Condition int
 const (
 	Idle    Condition = iota // there, but doing nothing: an inactive unit
 	Fine                     // running, or done well
-	Warning                  // on its way, or held: starting, paused; a machine with problems
+	Warning                  // on its way, or held: starting, paused, just restarted; a machine with problems
 	Broken                   // failed, crashed, unhealthy; a machine that's down
 )
 
 // Condition rates u by its active state: failed is broken, changing a warning,
-// active fine, and anything else idle.
+// active fine unless it just restarted on its own, and anything else idle.
 func (u Unit) Condition() Condition {
 	switch u.Active {
 	case "failed":
@@ -76,15 +92,22 @@ func (u Unit) Condition() Condition {
 	case "activating", "deactivating", "reloading", "refreshing":
 		return Warning
 	case "active":
+		if u.RecentRestart {
+			return Warning
+		}
+
 		return Fine
 	}
 
 	return Idle
 }
 
-// Interesting says whether u is worth watching: broken, or enabled to run. The rest
-// are static or inactive units: hundreds of them, rarely of interest.
-func (u Unit) Interesting() bool { return u.Condition() == Broken || u.UnitFileState == "enabled" }
+// Interesting says whether u is worth watching: broken, just restarted on its own,
+// or enabled to run. The rest are static or inactive units: hundreds of them,
+// rarely of interest.
+func (u Unit) Interesting() bool {
+	return u.Condition() == Broken || u.RecentRestart || u.UnitFileState == "enabled"
+}
 
 // Failed returns the units in the failed state.
 func (r Report) Failed() []Unit {
@@ -127,15 +150,16 @@ func (r Report) StacksUp() int {
 }
 
 // Condition rates c: fine running and not unhealthy, or done with exit code 0, as
-// init containers are; a warning on its way or held: health starting, created,
-// paused, being removed; else broken: crashed, restarting (a crash loop), dead.
+// init containers are; a warning on its way or held: health starting, just
+// restarted on its own, created, paused, being removed; else broken: crashed,
+// restarting (a crash loop), dead.
 func (c Container) Condition() Condition {
 	switch c.State {
 	case "running":
-		switch c.Health {
-		case "unhealthy":
+		switch {
+		case c.Health == "unhealthy":
 			return Broken
-		case "starting":
+		case c.Health == "starting", c.RecentRestart:
 			return Warning
 		}
 
@@ -192,7 +216,7 @@ func (s Stack) Bad() []Container {
 const FullDisk = 90
 
 // Problems lists what's wrong: the host is down, or failed commands, a disk nearly
-// full, failed units, broken containers.
+// full, failed units, broken containers, and what just restarted on its own.
 func (r Report) Problems() []string {
 	if r.Err != nil {
 		return []string{"down: " + r.Err.Error()}
@@ -213,9 +237,26 @@ func (r Report) Problems() []string {
 		out = append(out, "failed: "+strings.Join(names, ", "))
 	}
 
+	var restarted []string
+
+	for _, u := range r.Units {
+		if u.RecentRestart && u.Condition() == Warning {
+			restarted = append(restarted, fmt.Sprintf("%s ×%d", u.Name, u.Restarts))
+		}
+	}
+
+	if len(restarted) > 0 {
+		out = append(out, "restarted: "+strings.Join(restarted, ", "))
+	}
+
 	for _, s := range r.Stacks {
-		for _, c := range s.Bad() {
-			out = append(out, "stack "+s.Name+": "+c.Name+" "+c.State+" ("+c.Status+")")
+		for _, c := range s.Containers {
+			switch {
+			case c.Condition() == Broken:
+				out = append(out, "stack "+s.Name+": "+c.Name+" "+c.State+" ("+c.Status+")")
+			case c.RecentRestart && c.Condition() == Warning:
+				out = append(out, fmt.Sprintf("stack %s: %s restarted ×%d", s.Name, c.Name, c.Restarts))
+			}
 		}
 	}
 

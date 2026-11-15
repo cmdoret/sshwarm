@@ -51,7 +51,7 @@ docker_cmd() {
 container_states() {
   # shellcheck disable=SC2086 # words, split on purpose: "sudo -n docker"
   $docker ps -aq --filter label=com.docker.compose.project |
-    xargs -r $docker inspect --format '{{.Name}} {{.State.StartedAt}} {{.State.FinishedAt}} {{.State.ExitCode}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' 2>/dev/null ||
+    xargs -r $docker inspect --format '{{.Name}} {{.State.StartedAt}} {{.State.FinishedAt}} {{.State.ExitCode}} {{.RestartCount}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' 2>/dev/null ||
     true
 }
 
@@ -79,7 +79,7 @@ docker=$(docker_cmd)
 echo "docker=$docker"
 
 section units systemctl show --timestamp=unix --no-pager \
-  -p Id,ActiveState,SubState,Description,Result,UnitFileState,StateChangeTimestamp '*.service'
+  -p Id,ActiveState,SubState,Description,Result,UnitFileState,StateChangeTimestamp,NRestarts,ActiveEnterTimestamp '*.service'
 # The installed units too: systemd unloads a stopped unit that nothing refers to.
 section unit-files systemctl list-unit-files --type=service --no-legend --no-pager
 if [ -n "$docker" ]; then

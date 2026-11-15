@@ -111,9 +111,9 @@ var machines = &kind{
 var services = &kind{
 	names:  []string{"services", "svc"},
 	keys:   []key.Binding{as(keyEnter, "logs"), keyDescribe},
-	titles: []string{"UNIT", "ACTIVE", "SUB", "RESULT", "AGE", "DESCRIPTION"},
+	titles: []string{"UNIT", "ACTIVE", "SUB", "RESULT", "RESTARTS", "AGE", "DESCRIPTION"},
 	status: 1,
-	age:    4,
+	age:    5,
 	rows:   func(r swarm.Report, s scope) []row { return serviceRows(r, s.all) },
 	logs:   func(_ swarm.Report, unit string) (string, string) { return unit, swarm.UnitLogs(unit) },
 	describe: func(_ swarm.Report, unit string) (string, string) {
@@ -162,9 +162,9 @@ var stacks = &kind{
 var containers = &kind{
 	names:  []string{"containers", "ctr"},
 	keys:   []key.Binding{as(keyEnter, "logs"), keyDescribe, keyOwner},
-	titles: []string{"CONTAINER", "STACK", "STATE", "AGE", "STATUS"},
+	titles: []string{"CONTAINER", "STACK", "STATE", "RESTARTS", "AGE", "STATUS"},
 	status: 2,
-	age:    3, // the time since it last started or stopped, as services' AGE
+	age:    4, // the time since it last started or stopped, as services' AGE
 	rows: func(r swarm.Report, sc scope) []row {
 		var rows []row
 

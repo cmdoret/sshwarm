@@ -184,7 +184,6 @@ type UnitInfo struct {
 
 	File, Restart, TriggeredBy string
 	MainPID, ExitStatus        int // the main process, 0 if none; its last exit status
-	Restarts                   int // automatic restarts since the unit was started
 
 	Memory, MemoryMax uint64 // bytes, as docker counts a container's; 0: unknown, or no limit
 	CPUTime           time.Duration
@@ -199,8 +198,8 @@ func DescribeUnit(unit string) string {
 	return inSections(
 		[2]string{"now", "date +%s"},
 		[2]string{"show", "systemctl show --timestamp=unix -p " +
-			"Id,Description,ActiveState,SubState,Result,UnitFileState,StateChangeTimestamp," +
-			"FragmentPath,MainPID,ExecMainStatus,NRestarts,Restart,TriggeredBy," +
+			"Id,Description,ActiveState,SubState,Result,UnitFileState,StateChangeTimestamp,NRestarts,ActiveEnterTimestamp," +
+			"FragmentPath,MainPID,ExecMainStatus,Restart,TriggeredBy," +
 			"MemoryCurrent,MemoryMax,CPUUsageNSec,TasksCurrent " + quote(unit)},
 		[2]string{"journal", "journalctl -u " + quote(unit) + " -n 10 -o short-iso --no-pager"},
 		[2]string{"cache", "cg=$(systemctl show -P ControlGroup " + quote(unit) + `); [ -z "$cg" ] || grep '^inactive_file ' "/sys/fs/cgroup$cg/memory.stat"`},
@@ -211,15 +210,17 @@ func DescribeUnit(unit string) string {
 func ParseUnit(out string) (UnitInfo, error) {
 	sec := sections(out)
 
-	units := parseUnits(sec["show"], misread{}) // the card shows what reads
+	now := unix(sec["now"])
+
+	units := parseUnits(sec["show"], now, misread{}) // the card shows what reads
 	if len(units) == 0 {
 		return UnitInfo{}, errors.New("no unit in systemctl show's output")
 	}
 
 	p := keyValues(sec["show"])
 	u := UnitInfo{
-		Unit: units[0], Now: unix(sec["now"]), File: p["FragmentPath"], Restart: p["Restart"], TriggeredBy: p["TriggeredBy"],
-		MainPID: int(count(p["MainPID"])), ExitStatus: int(count(p["ExecMainStatus"])), Restarts: int(count(p["NRestarts"])),
+		Unit: units[0], Now: now, File: p["FragmentPath"], Restart: p["Restart"], TriggeredBy: p["TriggeredBy"],
+		MainPID: int(count(p["MainPID"])), ExitStatus: int(count(p["ExecMainStatus"])),
 		Memory: count(p["MemoryCurrent"]), MemoryMax: count(p["MemoryMax"]),
 		CPUTime: time.Duration(count(p["CPUUsageNSec"])), Tasks: count(p["TasksCurrent"]),
 	}
@@ -274,6 +275,7 @@ func (d Docker) DescribeStack(stack string) string {
 	ids := "ids=$(" + string(d) + " ps -aq " + projectFilter(stack) + `); [ -z "$ids" ] || `
 
 	return inSections(
+		[2]string{"now", "date +%s"},
 		[2]string{"cpus", "getconf _NPROCESSORS_ONLN"},
 		[2]string{"ps", string(d) + " ps -a " + projectFilter(stack) +
 			` --format '{{.Names}}\t{{.Label "com.docker.compose.service"}}\t{{.State}}\t{{.Status}}\t{{.Ports}}'`},
@@ -301,7 +303,7 @@ func ParseStack(out string) (StackInfo, error) {
 	}
 
 	s := StackInfo{CPUs: int(count(sec["cpus"]))}
-	states := parseStates(sec["states"], misread{}) // the card shows what reads
+	states := parseStates(sec["states"], unix(sec["now"]), misread{}) // the card shows what reads
 
 	for line := range strings.SplitSeq(ps, "\n") {
 		f := strings.Split(line, "\t")
@@ -330,7 +332,6 @@ type ContainerInfo struct {
 	Project, Service        string // its compose stack and service, if any
 	Running                 bool
 	StartedAt               time.Time
-	Restarts                int
 	RestartPolicy           string
 	HealthLast              string // its healthcheck's last output
 	HealthStreak            int    // failed checks in a row
@@ -395,15 +396,17 @@ func ParseContainer(out string) (ContainerInfo, error) {
 		return ContainerInfo{}, errors.New("no container in docker inspect's output")
 	}
 
-	in := found[0]
+	in, now := found[0], unix(sec["now"])
 	c := ContainerInfo{
-		Container: Container{Name: strings.TrimPrefix(in.Name, "/"), State: in.State.Status, ExitCode: in.State.ExitCode},
-		Image:     in.Config.Image,
-		Command:   strings.Join(slices.Concat(in.Config.Entrypoint, in.Config.Cmd), " "),
-		Project:   in.Config.Labels["com.docker.compose.project"], Service: in.Config.Labels["com.docker.compose.service"],
-		Running: in.State.Running, StartedAt: in.State.StartedAt,
-		Restarts: in.RestartCount, RestartPolicy: in.HostConfig.RestartPolicy.Name,
-		CPUs: int(count(sec["cpus"])), Now: unix(sec["now"]),
+		Container: Container{
+			Name: strings.TrimPrefix(in.Name, "/"), State: in.State.Status, ExitCode: in.State.ExitCode,
+			Restarts: in.RestartCount, RecentRestart: restartedRecently(in.RestartCount, in.State.StartedAt, now),
+		},
+		Image:   in.Config.Image,
+		Command: strings.Join(slices.Concat(in.Config.Entrypoint, in.Config.Cmd), " "),
+		Project: in.Config.Labels["com.docker.compose.project"], Service: in.Config.Labels["com.docker.compose.service"],
+		Running: in.State.Running, StartedAt: in.State.StartedAt, RestartPolicy: in.HostConfig.RestartPolicy.Name,
+		CPUs: int(count(sec["cpus"])), Now: now,
 	}
 
 	if h := in.State.Health; h != nil {
