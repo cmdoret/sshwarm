@@ -185,6 +185,8 @@ func keyMsg(k string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyShiftRight}
 	case "ctrl+k":
 		return tea.KeyMsg{Type: tea.KeyCtrlK}
+	case "down":
+		return tea.KeyMsg{Type: tea.KeyDown}
 	}
 
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
@@ -275,6 +277,33 @@ echo line-two
 	// Back down, to the machines.
 	s.keys("esc")
 	s.expect("machines 1", "enter open")
+}
+
+// The command bar completes what's typed with tab: a table's name, then all or a
+// machine's name; ↓ goes to the next completion.
+func TestCompletion(t *testing.T) {
+	web := fixture(t)
+	web.Host = inventory.Host{Name: "web-1", Address: "web-1"}
+
+	s := start(t, fixture(t), web)
+
+	s.keys(":", "co", "tab", " w", "tab", "enter")
+	s.expect("web-1 · NixOS", "containers 5")
+
+	s.keys(":", "svc a", "tab")
+
+	if got := s.model().command.Value(); got != "svc all" {
+		t.Errorf("svc a, tab: %q, want svc all first", got)
+	}
+
+	s.keys("esc", ":", "svc a", "down", "tab")
+
+	if got := s.model().command.Value(); got != "svc app-node-argiope" {
+		t.Errorf("svc a, down, tab: %q, want the next completion", got)
+	}
+
+	s.keys("enter")
+	s.expect("app-node-argiope · NixOS", "services 3")
 }
 
 // ? lists the keys of the screen under it: its own, those that move around, and

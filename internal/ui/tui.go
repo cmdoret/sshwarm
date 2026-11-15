@@ -95,9 +95,6 @@ type model struct {
 }
 
 func newModel(ctx context.Context, hosts []inventory.Host, timeout, interval time.Duration) *model {
-	c := textinput.New()
-	c.Prompt = ":"
-
 	fleet := newFleet()
 
 	return &model{
@@ -105,7 +102,7 @@ func newModel(ctx context.Context, hosts []inventory.Host, timeout, interval tim
 		probes:  prober{ctx: ctx, hosts: hosts, timeout: timeout, interval: interval, running: true}, // Init's
 		spin:    spinner.New(spinner.WithSpinner(spinner.Meter), spinner.WithStyle(keyStyle)),
 		fleet:   fleet,
-		screens: []screen{fleet}, command: c,
+		screens: []screen{fleet}, command: newCommandBar(hosts),
 	}
 }
 
@@ -287,98 +284,10 @@ func result(a action, out string, err error) string {
 	return fmt.Sprintf("%s %s failed: %s", a.verb, a.what, why)
 }
 
-// commandKey types into the command bar: enter goes there, esc cancels.
-func (m *model) commandKey(k tea.KeyMsg) tea.Cmd {
-	var cmd tea.Cmd
-
-	switch {
-	case key.Matches(k, keyBack):
-		m.command.Blur()
-		m.command.SetValue("")
-	case key.Matches(k, keyEnter):
-		m.command.Blur()
-		cmd = m.goTo(m.command.Value())
-		m.command.SetValue("")
-	default:
-		m.command, cmd = m.command.Update(k)
-	}
-
-	return cmd
-}
-
-// goTo opens the table a command names: a kind, then a machine by name, or else
-// the machine on screen; every machine's with "all", or from the machines. Like
-// k9s, it starts over from the machines, so esc goes back there; ":machines" just
-// goes back.
-func (m *model) goTo(command string) tea.Cmd {
-	kindName, name, _ := strings.Cut(strings.TrimSpace(command), " ")
-	if kindName == "" {
-		return nil
-	}
-
-	k := kindNamed(kindName)
-	if k == nil {
-		var names []string
-		for _, k := range kinds {
-			names = append(names, strings.Join(k.names, "/"))
-		}
-
-		m.flash = fmt.Sprintf("no %q here: try %s", kindName, strings.Join(names, ", "))
-
-		return nil
-	}
-
-	if k == machines {
-		m.popTo(1)
-
-		return nil
-	}
-
-	host, err := m.machine(strings.TrimSpace(name))
-	if err != nil {
-		m.flash = err.Error()
-
-		return nil
-	}
-
-	if host >= 0 && m.reports[host].Err == nil && !slices.Contains(tabsOf(m.reports[host]), k) {
-		m.flash = fmt.Sprintf("%s has no %s", m.hosts[host].Name, k.names[0])
-
-		return nil
-	}
-
-	m.popTo(1)
-
-	if host >= 0 {
-		m.fleet.grid.choose(m.hosts[host].Name) // so that esc goes back to it
-	}
-
-	return m.push(newHost(k, host, ""))
-}
-
 // shell hands the terminal to ssh on h, running cmd, or with cmd "", a login shell.
 // The TUI is back when it ends.
 func (m *model) shell(h inventory.Host, cmd string) tea.Cmd {
 	return execProcess(remote.Interactive(m.ctx, h, cmd), func(err error) tea.Msg { return shellDoneMsg{err} })
-}
-
-// machine is the index of the machine named, or else of the one on screen; -1 for
-// every machine: named "all", or none on screen.
-func (m *model) machine(name string) (int, error) {
-	switch {
-	case name == "all":
-		return -1, nil
-	case name != "":
-		return inventory.Find(m.hosts, name)
-	}
-
-	for _, s := range slices.Backward(m.screens) {
-		if h, ok := s.(*host); ok {
-			return h.machine, nil
-		}
-	}
-
-	return -1, nil
 }
 
 // View shows the top screen, every line cut to the window's width.
