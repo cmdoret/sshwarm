@@ -15,6 +15,7 @@ var (
 	dimStyle   = lipgloss.NewStyle().Faint(true)
 	keyStyle   = lipgloss.NewStyle().Bold(true).Foreground(accent)
 	pillStyle  = keyStyle.Reverse(true)
+	matchStyle = lipgloss.NewStyle().Reverse(true) // what a search found; the match shown is a pill
 )
 
 // pill highlights text with the accent color as its background.

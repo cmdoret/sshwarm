@@ -58,6 +58,9 @@ var (
 	keyWrap   = bind("w", "wrap", "w")
 	keyFull   = bind("f", "fullscreen", "f")
 	keyCopy   = bind("c", "copy", "c")
+	keyMatch  = bind("n/N", "older/newer", "n", "N") // the search's matches
+	keyOlder  = bind("", "", "n")
+	keyNewer  = bind("", "", "N")
 )
 
 // bind binds keys, with the help k and desc.

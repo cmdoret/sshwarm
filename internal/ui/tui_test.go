@@ -277,6 +277,45 @@ echo line-two
 	s.expect("machines 1", "enter open")
 }
 
+// / searches the logs as it's typed, ignoring case, and shows the newest match; n
+// and N go to older and newer ones, round past the ends. The lines wrap: the match
+// shown must still be on screen.
+func TestLogSearch(t *testing.T) {
+	r := fixture(t)
+	// 100 lines, each wrapping to two; ERROR on lines 10, 50 and 90.
+	testutil.FakeBin(t, "ssh", `cat >/dev/null; awk 'BEGIN { pad = sprintf("%200s", ""); gsub(/ /, "y", pad)
+  for (i = 1; i <= 100; i++) print (i % 40 == 10 ? "ERROR " : "line ") i " " pad }'`)
+
+	s := start(t, r)
+	s.keys("enter")
+	s.logs("enter")
+	s.keys("/", "error")
+	s.expect("/error", "3/3", "ERROR 90", "n/N older/newer")
+
+	s.keys("enter", "n")
+	s.expect("2/3", "ERROR 50")
+
+	if v := s.m.View(); strings.Contains(v, "ERROR 90") {
+		t.Errorf("the newest match is still on screen after n:\n%s", v)
+	}
+
+	s.keys("N", "N")
+	s.expect("1/3", "ERROR 10")
+
+	s.keys("/", "nope")
+	s.expect("no match")
+
+	// esc drops the search, and the next esc leaves the logs.
+	s.keys("esc")
+
+	if v := s.m.View(); strings.Contains(v, "/error") || strings.Contains(v, "no match") {
+		t.Errorf("the search stayed after esc:\n%s", v)
+	}
+
+	s.keys("esc")
+	s.expect("services 3")
+}
+
 // From the machines, or with "all", the command bar lists every machine's rows, by
 // machine: each row acts on its own machine, by its own name.
 func TestEveryMachine(t *testing.T) {
@@ -710,6 +749,21 @@ func TestCard(t *testing.T) {
 		t.Error("a card shows an environment value")
 	}
 
+	// / searches the card too, as drawn: from its top, it shows the variable found.
+	s.keys("g", "/", "tz", "enter")
+	s.expect("/tz", "1/1", "TZ", "n/N up/down")
+
+	if v := s.m.View(); strings.Contains(v, "  0%") {
+		t.Errorf("the search didn't show the variable at the card's end:\n%s", v)
+	}
+
+	// A refresh keeps the match shown; esc in the search drops it.
+	desc := s.output()
+	s.m, cmd = s.m.Update(redescribeMsg{desc, desc.runs})
+	s.read(cmd)
+	s.expect("1/1")
+	s.keys("/", "esc")
+
 	s.keys("v")
 	s.expect(`"Id": "044c2818`, "v card")
 
@@ -717,8 +771,8 @@ func TestCard(t *testing.T) {
 	s.logs("r")
 	s.expect("running · health unhealthy", "r refresh", "refreshed ")
 
-	if n, _ := os.ReadFile(runs); len(n) != 2 {
-		t.Errorf("described %d times, want 2: r didn't run it again", len(n))
+	if n, _ := os.ReadFile(runs); len(n) != 3 { // the search's refresh, then r
+		t.Errorf("described %d times, want 3: r didn't run it again", len(n))
 	}
 
 	// In a while, it describes again by itself, the last card showing meanwhile.
@@ -737,8 +791,8 @@ func TestCard(t *testing.T) {
 		t.Error("the spinner turns after describing")
 	}
 
-	if n, _ := os.ReadFile(runs); len(n) != 3 {
-		t.Errorf("described %d times, want 3: it didn't refresh", len(n))
+	if n, _ := os.ReadFile(runs); len(n) != 4 {
+		t.Errorf("described %d times, want 4: it didn't refresh", len(n))
 	}
 
 	// A refresh due before r, or for a closed card, doesn't run.
