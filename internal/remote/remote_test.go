@@ -31,7 +31,7 @@ func TestCommand(t *testing.T) {
 
 // Share has ssh share connections, with their sockets in ~/.ssh, but to a host
 // whose ssh config already sets how, as ssh -G tells, or if ssh -G fails; and none
-// without a ~/.ssh to keep the sockets in.
+// without a ~/.ssh to keep the sockets in, or with one too long for their paths.
 func TestShare(t *testing.T) {
 	testutil.FakeBin(t, "ssh", `case "$*" in
   *own*) printf 'user me\ncontrolmaster auto\ncontrolpath /home/me/.ssh/cm-x\n' ;;
@@ -39,7 +39,14 @@ func TestShare(t *testing.T) {
   *) printf 'user me\ncontrolmaster false\ncontrolpersist no\n' ;;
 esac`)
 
-	home := t.TempDir()
+	// A home short enough for a socket's path, which t.TempDir's isn't under a long
+	// TMPDIR, as nix develop's or macOS's.
+	home, err := os.MkdirTemp("/tmp", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
 	t.Setenv("HOME", home)
 
 	hosts := []inventory.Host{{Address: "plain", Opts: []string{"-p", "2222"}}, {Address: "own"}, {Address: "broken"}}
@@ -48,9 +55,20 @@ esac`)
 		t.Errorf("shared without a ~/.ssh: %q", got[0].Opts)
 	}
 
-	if err := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); err != nil {
-		t.Fatal(err)
+	long := filepath.Join(home, strings.Repeat("x", 40))
+	for _, h := range []string{home, long} {
+		if err := os.MkdirAll(filepath.Join(h, ".ssh"), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
+
+	t.Setenv("HOME", long)
+
+	if got := Share(t.Context(), hosts); got[0].Opts[0] != "-p" {
+		t.Errorf("shared with a ~/.ssh too long for a socket's path: %q", got[0].Opts)
+	}
+
+	t.Setenv("HOME", home)
 
 	got := Share(t.Context(), hosts)
 
