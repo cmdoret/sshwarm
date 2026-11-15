@@ -749,6 +749,21 @@ func TestCard(t *testing.T) {
 		t.Error("a card shows an environment value")
 	}
 
+	// / searches the card too, as drawn: from its top, it shows the variable found.
+	s.keys("g", "/", "tz", "enter")
+	s.expect("/tz", "1/1", "TZ", "n/N up/down")
+
+	if v := s.m.View(); strings.Contains(v, "  0%") {
+		t.Errorf("the search didn't show the variable at the card's end:\n%s", v)
+	}
+
+	// A refresh keeps the match shown; esc in the search drops it.
+	desc := s.output()
+	s.m, cmd = s.m.Update(redescribeMsg{desc, desc.runs})
+	s.read(cmd)
+	s.expect("1/1")
+	s.keys("/", "esc")
+
 	s.keys("v")
 	s.expect(`"Id": "044c2818`, "v card")
 
@@ -756,8 +771,8 @@ func TestCard(t *testing.T) {
 	s.logs("r")
 	s.expect("running · health unhealthy", "r refresh", "refreshed ")
 
-	if n, _ := os.ReadFile(runs); len(n) != 2 {
-		t.Errorf("described %d times, want 2: r didn't run it again", len(n))
+	if n, _ := os.ReadFile(runs); len(n) != 3 { // the search's refresh, then r
+		t.Errorf("described %d times, want 3: r didn't run it again", len(n))
 	}
 
 	// In a while, it describes again by itself, the last card showing meanwhile.
@@ -776,8 +791,8 @@ func TestCard(t *testing.T) {
 		t.Error("the spinner turns after describing")
 	}
 
-	if n, _ := os.ReadFile(runs); len(n) != 3 {
-		t.Errorf("described %d times, want 3: it didn't refresh", len(n))
+	if n, _ := os.ReadFile(runs); len(n) != 4 {
+		t.Errorf("described %d times, want 4: it didn't refresh", len(n))
 	}
 
 	// A refresh due before r, or for a closed card, doesn't run.

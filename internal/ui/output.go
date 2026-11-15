@@ -87,7 +87,7 @@ func (o *output) start(ctx context.Context, follow bool) tea.Cmd {
 	o.runs++
 
 	if !again {
-		o.shown = ""
+		o.shown, o.match = "", -1
 		o.pager.SetContent("loading…")
 	}
 
@@ -102,7 +102,7 @@ func (o *output) stop() {
 		o.cancel()
 	}
 
-	o.cancel, o.ch, o.lines, o.match = nil, nil, nil, -1
+	o.cancel, o.ch, o.lines = nil, nil, nil
 }
 
 // add shows a stream's next lines, and waits for more.
@@ -137,46 +137,51 @@ func (o *output) add(msg logLinesMsg) tea.Cmd {
 
 // setContent draws a description's card once all its output is in, or else shows
 // the output as it came, its long lines wrapped to the window unless wrapping is
-// off. Lines wider than the window, a card's or unwrapped, scroll left and right.
+// off (wraps). Lines wider than the window, a card's or unwrapped, scroll left and
+// right.
 func (o *output) setContent() {
 	if o.showsCard() && o.ch != nil {
 		return // still "loading…", or the last card: not the next one's partial output
 	}
 
 	o.shown = strings.Join(o.lines, "\n")
+	lines := o.lines
 
 	if o.showsCard() {
 		if drawn, err := o.card(o.shown); err == nil {
-			o.shown = drawn
-			o.pager.SetContent(drawn)
-
-			return
+			o.shown, lines = drawn, strings.Split(drawn, "\n")
 		}
 	}
 
-	content := o.highlighted()
-	if o.wrap {
+	content := o.highlighted(lines)
+	if o.wraps() {
 		content = o.wrapped(content)
 	}
 
 	o.pager.SetContent(content)
 }
 
+// wraps says whether the lines shown wrap to the window: unless wrapping is off,
+// or it's a description, drawn whole as a card.
+func (o *output) wraps() bool { return o.wrap && !o.showsCard() }
+
 // wrapped wraps s's lines to the window.
 func (o *output) wrapped(s string) string { return lipgloss.NewStyle().Width(o.pager.Width).Render(s) }
 
-// highlighted is the lines, with what the search found highlighted, and the match
-// shown as a pill. It notes the lines that match in hits.
-func (o *output) highlighted() string {
+// highlighted is lines, those shown, with what the search found highlighted and the
+// match shown as a pill. It notes the lines that match in hits.
+func (o *output) highlighted(lines []string) string {
 	o.hits = nil
 	if o.pattern == nil {
 		return o.shown
 	}
 
-	lines := slices.Clone(o.lines)
+	lines = slices.Clone(lines)
 
 	for i, line := range lines {
-		if !o.pattern.MatchString(line) {
+		// A card's line loses its colors, so that what's found stands out alone.
+		plain := ansi.Strip(line)
+		if !o.pattern.MatchString(plain) {
 			continue
 		}
 
@@ -187,7 +192,7 @@ func (o *output) highlighted() string {
 			st = pillStyle
 		}
 
-		lines[i] = o.pattern.ReplaceAllStringFunc(line, func(s string) string { return st.Render(s) })
+		lines[i] = o.pattern.ReplaceAllStringFunc(plain, func(s string) string { return st.Render(s) })
 	}
 
 	return strings.Join(lines, "\n")
@@ -226,10 +231,10 @@ func (o *output) step(dir int) {
 	o.pager.SetYOffset(o.offset(o.match) - o.pager.Height/3)
 }
 
-// offset is the pager's line where line i of the output starts: past the lines
+// offset is the pager's line where line i of those shown starts: past the lines
 // before it, as wrapped.
 func (o *output) offset(i int) int {
-	if !o.wrap || i == 0 {
+	if !o.wraps() || i == 0 {
 		return i
 	}
 
@@ -303,9 +308,7 @@ func (o *output) key(m *model, k tea.KeyMsg) tea.Cmd {
 
 	switch {
 	case key.Matches(k, keyFilter):
-		if !o.showsCard() { // a card is short, and drawn whole
-			return o.search.Focus()
-		}
+		return o.search.Focus()
 	case key.Matches(k, keyOlder):
 		o.step(-1)
 	case key.Matches(k, keyNewer):
@@ -320,7 +323,7 @@ func (o *output) key(m *model, k tea.KeyMsg) tea.Cmd {
 		}
 	case key.Matches(k, keyRaw):
 		if o.card != nil {
-			o.raw = !o.raw
+			o.raw, o.match = !o.raw, -1 // other lines: the match shown isn't there
 			o.setContent()
 			o.pager.GotoTop()
 		}
@@ -357,7 +360,7 @@ func (o *output) view(m *model) frame {
 	}
 
 	status := dimStyle.Render(fmt.Sprintf("%3.f%%", o.pager.ScrollPercent()*100))
-	if o.pattern != nil && !o.showsCard() {
+	if o.pattern != nil {
 		status = o.matchStatus() + dimStyle.Render(" · ") + status
 	}
 	if o.card != nil && !o.refreshed.IsZero() { // a description refreshes: say how fresh it is
@@ -382,12 +385,16 @@ func (o *output) view(m *model) frame {
 		help = append(help, keyRaw)
 	}
 
-	if !o.showsCard() {
-		help = append(help, as(keyFilter, "search"))
-		if len(o.hits) > 0 {
-			help = append(help, keyMatch)
-		}
+	help = append(help, as(keyFilter, "search"))
 
+	switch {
+	case len(o.hits) > 0 && o.showsCard():
+		help = append(help, as(keyMatch, "up/down")) // a card has no older and newer lines
+	case len(o.hits) > 0:
+		help = append(help, keyMatch)
+	}
+
+	if !o.showsCard() {
 		help = append(help, keyWrap)
 	}
 
