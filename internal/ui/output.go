@@ -338,7 +338,7 @@ func (o *output) help() []key.Binding {
 		help = append(help, keyWrap)
 	}
 
-	return append(help, keyFull, keyCopy, keyRefresh, keyBack, keyQuit, keyHelp)
+	return append(help, keyFull, keyCopy, keyRefresh, keyBack)
 }
 
 // moves are the keys that move around the output, for the help screen: the pager's,

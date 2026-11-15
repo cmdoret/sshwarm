@@ -7,8 +7,9 @@ import (
 )
 
 // The TUI's keys, with their help. Screens handle them with key.Matches, and list
-// those they handle on their help line, in order, and those that move around on the
-// help screen: one binding is both. Those without help are listed by another.
+// those they handle on their help line, in order, but those of every screen
+// (everywhere), and those that move around on the help screen: one binding is
+// both. Those without help are listed by another.
 var (
 	keyForceQuit = bind("^c", "quit, even while typing", "ctrl+c")
 	keyQuit      = bind("q", "quit", "q")
@@ -68,6 +69,10 @@ var (
 func bind(k, desc string, keys ...string) key.Binding {
 	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(k, desc))
 }
+
+// everywhere are the keys every screen takes, at the end of every help line: ? last,
+// as it's never cut off.
+var everywhere = []key.Binding{keyGoTo, keyQuit, keyHelp}
 
 // gridMoves are the keys that move around a list, and sort it, for the help screen.
 var gridMoves = []key.Binding{

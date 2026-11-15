@@ -73,7 +73,7 @@ func (f *fleet) view(m *model) frame {
 		title:  crumbs(fmt.Sprintf("machines %d", len(m.reports))) + f.filterView(),
 		status: m.refreshStatus(),
 		body:   f.grid.view(),
-		help:   append(f.help(m), keyFilter, keyGoTo, keyRefresh, keyQuit, keyHelp),
+		help:   append(f.help(m), keyFilter, keyRefresh),
 		moves:  gridMoves,
 	}
 }

@@ -44,8 +44,9 @@ type screen interface {
 }
 
 // frame is what a screen shows: its body in a box, with the title and the status on
-// its top edge, and its help below; or when full, the body alone, the whole window.
-// The help screen lists its help and the keys that move around it.
+// its top edge, and its help below, its own keys then those of every screen; or
+// when full, the body alone, the whole window. The help screen lists its help and
+// the keys that move around it.
 type frame struct {
 	title, status, body string
 	help, moves         []key.Binding
@@ -441,14 +442,14 @@ func (m *model) draw(f frame) string {
 	b.WriteString(dimStyle.Render("╰"+strings.Repeat("─", inner)+"╯") + "\n")
 
 	if bar == "" {
-		bar = helpBar(f.help, m.width)
+		bar = helpBar(slices.Concat(f.help, everywhere), m.width)
 	}
 
 	return b.String() + bar
 }
 
-// helpBar is a screen's help line, cut to width but for its last key, ? help, which
-// says where the rest is.
+// helpBar is a help line, cut to width but for its last key, ? help, which says
+// where the rest is.
 func helpBar(keys []key.Binding, width int) string {
 	if len(keys) < 2 {
 		return helpLine(keys)

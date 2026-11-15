@@ -11,7 +11,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// anywhere are the keys every screen takes, for the help screen.
+// anywhere are the keys every screen takes, for the help screen: those at the end of
+// every help line (everywhere), and ^c.
 var anywhere = []key.Binding{as(keyGoTo, "go to: :ctr web, :svc all"), keyHelp, keyQuit, keyForceQuit}
 
 // helpScreen lists the keys of the screen under it, as k9s's does: its own, then
@@ -21,15 +22,11 @@ type helpScreen struct {
 	pager  viewport.Model
 }
 
-// newHelp is the help screen of the screen whose frame is under: its help line,
-// but for the keys every screen takes, and its moves.
+// newHelp is the help screen of the screen whose frame is under: its own keys, and
+// those that move around it.
 func newHelp(under frame) *helpScreen {
-	own := slices.DeleteFunc(slices.Clone(under.help), func(b key.Binding) bool {
-		return slices.ContainsFunc(anywhere, func(a key.Binding) bool { return a.Help().Key == b.Help().Key })
-	})
-
 	return &helpScreen{
-		blocks: []string{keysCard("Here", own), keysCard("Moving around", under.moves), keysCard("Anywhere", anywhere)},
+		blocks: []string{keysCard("Here", under.help), keysCard("Moving around", under.moves), keysCard("Anywhere", anywhere)},
 		pager:  viewport.New(0, 0),
 	}
 }
@@ -101,7 +98,7 @@ func (h *helpScreen) view(*model) frame {
 	return frame{
 		title: crumbs("help"), body: h.pager.View(),
 		status: dimStyle.Render(fmt.Sprintf("%3.f%%", h.pager.ScrollPercent()*100)), // a narrow window scrolls
-		help:   []key.Binding{keyBack, keyQuit, as(keyHelp, "back")},
+		help:   []key.Binding{keyBack},
 	}
 }
 
