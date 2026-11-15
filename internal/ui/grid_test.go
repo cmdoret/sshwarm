@@ -64,6 +64,10 @@ func TestTones(t *testing.T) {
 	if s := stackRow(r, starting); s.tone != inherit || s.cells[0].tone != warn {
 		t.Errorf("starting stack: %+v", s)
 	}
+	looping := swarm.Stack{Name: "s", Containers: []swarm.Container{{Name: "app", State: "running", Status: "Up 40 seconds", Restarts: 7, RecentRestart: true}}}
+	if s := stackRow(r, looping); s.cells[0].tone != warn || s.cells[3].text != "app restarted ×7" {
+		t.Errorf("crash-looping stack: %+v", s)
+	}
 }
 
 // Units list failed first, then by name ignoring case.

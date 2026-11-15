@@ -4,7 +4,7 @@
 demo-job-1	job	exited	Exited (1) 7 seconds ago	
 demo-web-1	web	running	Up 8 seconds (unhealthy)	127.0.0.1:18080->80/tcp
 ### states
-/demo-job-1 2026-11-10T06:40:00Z 2026-11-10T06:40:01Z 1 -
-/demo-web-1 2026-11-10T06:40:00Z 0001-01-01T00:00:00Z 0 unhealthy
+/demo-job-1 2026-11-10T06:40:00Z 2026-11-10T06:40:01Z 1 0 -
+/demo-web-1 2026-11-10T06:40:00Z 0001-01-01T00:00:00Z 0 0 unhealthy
 ### stats
 demo-web-1	6.86%	0.01%	1.73MiB / 15.24GiB

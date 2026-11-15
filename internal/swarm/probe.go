@@ -106,18 +106,19 @@ func Parse(out string) (Report, error) {
 
 	kv := keyValues(meta)
 	bad := misread{}
+	now := unix(kv["now"])
 	r := Report{
 		OS:            kv["os"],
 		Revision:      kv["revision"],
-		Now:           unix(kv["now"]),
+		Now:           now,
 		Deployed:      unix(kv["deployed"]),
 		RebootPending: kv["reboot"] == "true",
 		Load:          usage(kv["load"]),
 		Memory:        usage(kv["memory"]),
 		Disk:          usage(kv["disk"]),
 		Docker:        Docker(kv["docker"]),
-		Units:         withUnloaded(parseUnits(sec["units"], bad), sec["unit-files"], bad),
-		Stacks:        parseStacks(sec["containers"], parseStates(sec["states"], bad), bad),
+		Units:         withUnloaded(parseUnits(sec["units"], now, bad), sec["unit-files"], bad),
+		Stacks:        parseStacks(sec["containers"], parseStates(sec["states"], now, bad), bad),
 	}
 
 	if up, err := strconv.ParseFloat(kv["uptime"], 64); err == nil {
@@ -163,8 +164,9 @@ func (m misread) note(section, line string) {
 	}
 }
 
-// parseUnits reads systemctl show's output: a block of properties per unit.
-func parseUnits(raw string, bad misread) []Unit {
+// parseUnits reads systemctl show's output: a block of properties per unit. now is
+// the host's clock, which tells a recent restart.
+func parseUnits(raw string, now time.Time, bad misread) []Unit {
 	var units []Unit
 
 	for block := range strings.SplitSeq(raw, "\n\n") {
@@ -175,10 +177,15 @@ func parseUnits(raw string, bad misread) []Unit {
 			continue
 		}
 
+		// A reload changes the state, not when it last became active: a restart does.
+		restarts := int(count(p["NRestarts"]))
+		started := unix(strings.TrimPrefix(p["ActiveEnterTimestamp"], "@"))
+
 		units = append(units, Unit{
 			Name: p["Id"], Active: p["ActiveState"], Sub: p["SubState"], Description: p["Description"],
 			Result: p["Result"], UnitFileState: p["UnitFileState"],
-			Since: unix(strings.TrimPrefix(p["StateChangeTimestamp"], "@")),
+			Since:    unix(strings.TrimPrefix(p["StateChangeTimestamp"], "@")),
+			Restarts: restarts, RecentRestart: restartedRecently(restarts, started, now),
 		})
 	}
 
@@ -239,20 +246,20 @@ func parseStacks(raw string, states map[string]Container, bad misread) []Stack {
 }
 
 // stateFormat is what docker inspect says of a container, for parseStates: its
-// name, when it last started and stopped, its last exit code, and its health, "-"
-// without a healthcheck. probe.sh has it too.
-const stateFormat = `{{.Name}} {{.State.StartedAt}} {{.State.FinishedAt}} {{.State.ExitCode}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}`
+// name, when it last started and stopped, its last exit code, its restarts, and its
+// health, "-" without a healthcheck. probe.sh has it too.
+const stateFormat = `{{.Name}} {{.State.StartedAt}} {{.State.FinishedAt}} {{.State.ExitCode}} {{.RestartCount}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}`
 
 // parseStates reads docker inspect's lines in stateFormat, into containers by name:
-// their health, last exit code, and since when they're in their state, the later
-// of the two times. A container that never ran has docker's zero time for both,
-// the zero time.
-func parseStates(raw string, bad misread) map[string]Container {
+// their health, last exit code, restarts, and since when they're in their state,
+// the later of the two times. A container that never ran has docker's zero time
+// for both, the zero time. now is the host's clock, which tells a recent restart.
+func parseStates(raw string, now time.Time, bad misread) map[string]Container {
 	states := map[string]Container{}
 
 	for line := range strings.SplitSeq(raw, "\n") {
 		f := strings.Fields(line)
-		if len(f) != 5 {
+		if len(f) != 6 {
 			bad.note("states", line)
 
 			continue
@@ -261,19 +268,23 @@ func parseStates(raw string, bad misread) map[string]Container {
 		started, err1 := time.Parse(time.RFC3339Nano, f[1])
 		stopped, err2 := time.Parse(time.RFC3339Nano, f[2])
 		code, err3 := strconv.Atoi(f[3])
-		if err1 != nil || err2 != nil || err3 != nil {
+		restarts, err4 := strconv.Atoi(f[4])
+		if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
 			bad.note("states", line)
 
 			continue
 		}
 
-		c := Container{Name: strings.TrimPrefix(f[0], "/"), ExitCode: code, Since: started}
+		c := Container{
+			Name: strings.TrimPrefix(f[0], "/"), ExitCode: code, Since: started,
+			Restarts: restarts, RecentRestart: restartedRecently(restarts, started, now),
+		}
 		if stopped.After(started) { // exited, or waiting to restart
 			c.Since = stopped
 		}
 
-		if f[4] != "-" {
-			c.Health = f[4]
+		if f[5] != "-" {
+			c.Health = f[5]
 		}
 
 		states[c.Name] = c
