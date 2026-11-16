@@ -1,0 +1,48 @@
+---
+name: Docs
+on:
+  pull_request: # builds it, to catch what breaks it
+    branches: [main]
+    paths: ["docs/**", ".github/workflows/docs.yml"]
+  push: # builds and publishes it
+    branches: [main]
+    paths: ["docs/**", ".github/workflows/docs.yml"]
+permissions:
+  contents: read
+concurrency: # one publish at a time; a new push supersedes the previous one's
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: Build the website
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Build
+        run: nix develop .#ci --command just docs::build
+
+      - name: Upload
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: .output/docs
+
+  publish:
+    name: Publish to GitHub Pages
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # to publish
+      id-token: write # to prove it's this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.publish.outputs.page_url }}
+    steps:
+      - name: Publish
+        id: publish
+        uses: actions/deploy-pages@v5
