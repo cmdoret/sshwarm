@@ -1,8 +1,13 @@
 # Contributing
 
+The following kind of contributions are welcome:
+
+* New Issues (bug reports, questions, ideas, ...)
+* Pull Requests (documentation improvements, code improvements, new features, ...)
+
 ## Setup
 
-With [Nix](https://nixos.org/download) and [direnv](https://direnv.net):
+Setup [Nix](https://nixos.org/download) and [direnv](https://direnv.net) for your shell:
 
 ```sh
 git clone https://github.com/cmdoret/sshwarm && cd sshwarm
@@ -12,6 +17,8 @@ direnv allow   # or: nix develop
 The dev shell has Go and all the tooling to work in the repo.
 
 ## Tasks
+
+We use just as a task runner:
 
 | | |
 |---|---|
@@ -48,3 +55,13 @@ git push --follow-tags
 
 Then publish a GitHub release of the tag. CI uploads the binaries and pushes the
 images: `x.y.z`, and `latest` unless it's a pre-release.
+
+## AI contributions
+
+AI contributions are welcome, as long as:
+
+* the code passes all checks and follows the quality standards in place.
+* They are not unnecessarily verbose or overengineered
+* The PR descriptions issues and discussions are humen written
+
+The use of [samber/cc-skills-golang](https://github.com/samber/cc-skills-golang) is recommended.
