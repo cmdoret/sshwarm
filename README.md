@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/cmdoret/sshwarm/actions/workflows/checks.yml"><img src="https://img.shields.io/github/actions/workflow/status/cmdoret/sshwarm/checks.yml?branch=main&amp;label=checks" alt="checks"></a>
   <a href="https://github.com/cmdoret/sshwarm/releases/latest"><img src="https://img.shields.io/github/v/release/cmdoret/sshwarm" alt="release"></a>
-  <a href="https://cmdoret.net/sshwarm"><img src="https://img.shields.io/badge/docs-cmdoret.net%2Fsshwarm-blue" alt="docs"></a>
+  <a href="https://www.cmdoret.net/sshwarm"><img src="https://img.shields.io/badge/docs-cmdoret.net%2Fsshwarm-blue" alt="docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/cmdoret/sshwarm" alt="license"></a>
 </p>
 
@@ -45,4 +45,4 @@ Then `?` lists the keys.
 
 [Quickstart](docs/quickstart.md) · [Configuration](docs/configuration.md) ·
 [Architecture](docs/architecture.md) · [Contributing](docs/CONTRIBUTING.md), also at
-[cmdoret.net/sshwarm](https://cmdoret.net/sshwarm).
+[cmdoret.net/sshwarm](https://www.cmdoret.net/sshwarm).
