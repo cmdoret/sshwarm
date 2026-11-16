@@ -1,0 +1,13 @@
+# The documentation website, built by mdBook from these markdown files: `just docs::serve`.
+[book]
+title = "sshwarm"
+src = "."
+
+[build]
+build-dir = "../.output/docs"
+
+[output.html]
+site-url = "/sshwarm/" # served under it, as GitHub Pages serves a project: the 404 page's links need it
+git-repository-url = "https://github.com/cmdoret/sshwarm"
+edit-url-template = "https://github.com/cmdoret/sshwarm/edit/main/docs/{path}"
+additional-js = ["mermaid.js"]

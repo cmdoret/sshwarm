@@ -14,6 +14,9 @@ mod release 'tools/just/release.just'
 # Manage container images
 [group("modules")]
 mod image 'tools/just/image.just'
+# Build the documentation website
+[group("modules")]
+mod docs 'tools/just/docs.just'
 
 # List the recipes
 [private]

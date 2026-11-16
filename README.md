@@ -1,12 +1,19 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="" width="120">
+  <img src="docs/assets/logo.svg" alt="" width="120">
 </p>
 
 <h1 align="center">sshwarm</h1>
 
 <p align="center"><b><a href="https://k9scli.io">k9s</a> for ssh.</b> Your Linux machines, their services, containers and logs, in one terminal.</p>
 
-<p align="center"><a href="https://asciinema.org/a/jHeN9sWGwwmMRVq2" target="_blank"><img src="assets/sshwarm.gif" alt="" width="720"></a></p>
+<p align="center">
+  <a href="https://github.com/cmdoret/sshwarm/actions/workflows/checks.yml"><img src="https://img.shields.io/github/actions/workflow/status/cmdoret/sshwarm/checks.yml?branch=main&amp;label=checks" alt="checks"></a>
+  <a href="https://github.com/cmdoret/sshwarm/releases/latest"><img src="https://img.shields.io/github/v/release/cmdoret/sshwarm" alt="release"></a>
+  <a href="https://cmdoret.net/sshwarm"><img src="https://img.shields.io/badge/docs-cmdoret.net%2Fsshwarm-blue" alt="docs"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/cmdoret/sshwarm" alt="license"></a>
+</p>
+
+<p align="center"><a href="https://asciinema.org/a/jHeN9sWGwwmMRVq2" target="_blank"><img src="docs/assets/sshwarm.gif" alt="" width="720"></a></p>
 
 Tired of ssh-ing into box after box to find out what's deployed where, which service died
 overnight and which container is crash-looping? **sshwarm** shows the whole swarm at a
@@ -23,84 +30,19 @@ glance, with the logs of whatever is red a keypress away.
 go install github.com/cmdoret/sshwarm@latest
 ```
 
-Or run directly from the flake using nix:
-```sh
-nix run github:cmdoret/sshwarm -- --hosts hosts.toml
-```
-
-Or download a binary from the [releases](https://github.com/cmdoret/sshwarm/releases).
-
-## Requirements
-
-Linux machines with systemd and bash, reachable over ssh without a password prompt
-(keys or agent), where the ssh user:
-
-- is in the `systemd-journal` group.
-- can run docker without password (either rootless or with passwordless sudo).
-
-To start/stop services, or reboot machines, the user must also be root, or able to
-run `systemctl` with passwordless sudo.
+Or `nix run github:cmdoret/sshwarm`, a [release](https://github.com/cmdoret/sshwarm/releases)
+binary, or the [container image](docs/quickstart.md#container).
 
 ## Use
 
 ```sh
-sshwarm --hosts hosts.toml
+sshwarm --hosts hosts.toml   # one [[host]] per machine, with its name = "web-1"
 ```
 
-Machines behave like namespaces in k9s:
+Then `?` lists the keys.
 
-* `:` goes to a table: `:ctr web` lists the containers of the machine `web`.
-`:ctr all` (or `:ctr` from the machines) those of every machine, same with `:svc` and `:st`.
+## Docs
 
-### Hosts file
-
-Only `name` is required. ssh looks up `host`, or else `name`, in `~/.ssh/config` for
-anything not set in the file, like ports or jump hosts. Save it as
-`~/.config/sshwarm/hosts.toml`, or set `SSHWARM_HOSTS` or `SSHWARM_FLAKE`, to skip
-the flag. See `sshwarm --help` for more.
-
-```toml
-# hosts.toml: one [[host]] per machine
-[[host]]
-name = "db"                  # ssh db: user, key, port... from "Host db" in ~/.ssh/config
-
-[[host]]
-name = "web-1"
-host = "web-1.example.org"   # ssh -i ~/.ssh/web deploy@web-1.example.org
-user = "deploy"
-key  = "~/.ssh/web"
-```
-
-### Nix flake
-
-Instead of a hosts file, you may provide a Nix flake exposing `deploy.nodes` in its outputs.
-See [deploy-rs](https://github.com/serokell/deploy-rs#overall-usage) for more information.
-
-```sh
-sshwarm --flake ./nix
-```
-
-## How it works
-
-```mermaid
-flowchart LR
-    src["hosts.toml or flake.nix"] --> sw[sshwarm]
-    sw -- "ssh, in parallel,<br>with ~/.ssh/config" --> m["each machine<br>runs probe.sh"]
-    m -- "OS, reboot, usage,<br>units, stacks" --> sw
-    sw --> ui["browser:<br>machines, services,<br>stacks, containers"]
-    ui -. "logs, describe, shell,<br>on demand" .-> m
-```
-
-## Docker images
-
-Container images are also available, but they suffer from a few usability limitations:
-
-* nix is not included in the image, so you can only use `hosts.toml`
-* `hosts.toml` must fully define the hosts, as ssh refuses a mounted `~/.ssh/config`.
-
-```sh
-docker run --rm -it -v ./hosts.toml:/hosts.toml:ro \
-  -v ~/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro -v ~/.ssh/known_hosts:/root/.ssh/known_hosts:ro \
-  ghcr.io/cmdoret/sshwarm --hosts /hosts.toml
-```
-
+[Quickstart](docs/quickstart.md) · [Configuration](docs/configuration.md) ·
+[Architecture](docs/architecture.md) · [Contributing](docs/CONTRIBUTING.md), also at
+[cmdoret.net/sshwarm](https://cmdoret.net/sshwarm).
