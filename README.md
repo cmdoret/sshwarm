@@ -13,7 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/cmdoret/sshwarm" alt="license"></a>
 </p>
 
-<p align="center"><a href="https://asciinema.org/a/jHeN9sWGwwmMRVq2" target="_blank"><img src="docs/assets/sshwarm.gif" alt="" width="720"></a></p>
+<p align="center"><a href="https://asciinema.org/a/VWnselSOsXKvLzJO" target="_blank"><img src="docs/assets/sshwarm.gif" alt="" width="720"></a></p>
 
 Tired of ssh-ing into box after box to find out what's deployed where, which service died
 overnight and which container is crash-looping? **sshwarm** shows the whole swarm at a
