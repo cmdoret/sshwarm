@@ -8,6 +8,7 @@ let
     golangci-lint
     govulncheck
     just
+    mdbook
     nixfmt
     nushell
     shellcheck
