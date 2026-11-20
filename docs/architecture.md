@@ -11,20 +11,17 @@ flowchart LR
 
 1. sshwarm reads the machines from a hosts file or a flake.
 2. It pipes [`probe.sh`](https://github.com/cmdoret/sshwarm/blob/main/internal/swarm/probe.sh)
-   to every machine over ssh, in parallel, and waits for all. The browser does it
-   again `--refresh` after the last round ended.
-3. The probe only reads: OS, uptime, usage, pending reboot, `systemctl show` of every
+   to every machine over ssh, in parallel on every refresh.
+3. The probe reads: OS, uptime, usage, pending reboot, `systemctl show` of every
    service, `docker ps` and `docker inspect` of compose containers. It prints
-   `### <name>` sections; a command that fails prints `### error <name>`.
+   outputs and failures.
 4. sshwarm parses each machine's output into a report, and rates what's in it: idle,
-   fine, warning or broken. A machine's problems are what's broken, what restarted on
-   its own in the last 10 minutes, a disk 90% full, and the probe's errors.
-   `status` exits 1 on any.
+   fine, warning or broken.
 5. Logs, descriptions, shells and actions each run their own ssh command, on demand.
 
-## In time
+## Probing process
 
-A refresh, a unit's logs, then a container's restart:
+Example: A refresh, a unit's logs, then a container's restart:
 
 ```mermaid
 sequenceDiagram
@@ -54,6 +51,8 @@ sequenceDiagram
 
 ## Code
 
+The code is split into a few packages:
+
 | | |
 |---|---|
 | `main.go` | flags, commands |
@@ -66,7 +65,6 @@ sequenceDiagram
 
 - **Agentless.** A bash script over the user's own ssh: nothing to install, and
   their ssh config, keys and agent just work.
-- **Read-only probe.** Actions ask first, and `--read-only` turns them off.
-- **The machine's clock.** Ages are computed with the machine's time, not yours.
+- **The machine's clock.** Ages are computed with each machine's time.
 - **Bounded waits.** The probe stops itself on the machine before sshwarm gives up
-  on it, and gives `df` 2 s, as a hung mount would hang it.
+  on it (i.e. `--timeout`), and gives `df` 2 s, as a hung mount would hang it.

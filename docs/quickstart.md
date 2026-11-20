@@ -63,5 +63,5 @@ docker run --rm -it \
   ghcr.io/cmdoret/sshwarm --hosts /hosts.toml
 ```
 
-No nix inside, so no `--flake`. ssh refuses a mounted `~/.ssh/config`: the hosts
+The container does not have nix, so no `--flake`. ssh refuses a mounted `~/.ssh/config`: the hosts
 file must set `host`, `user` and `key`.

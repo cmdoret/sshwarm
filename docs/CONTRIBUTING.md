@@ -14,7 +14,7 @@ git clone https://github.com/cmdoret/sshwarm && cd sshwarm
 direnv allow   # or: nix develop
 ```
 
-The dev shell has Go and all the tooling to work in the repo.
+The nix dev shell has Go and all the tooling to work in the repo.
 
 ## Tasks
 
@@ -28,7 +28,7 @@ We use just as a task runner:
 | `just build` | binary and Nix package, into `.output/` |
 | `just update` | Go dependencies, flake lock, vendor hash |
 | `just docs::serve` | this documentation, live |
-| `just` | every recipe |
+| `just` | show every recipe |
 
 The git hooks format, lint, and update the Nix vendor hash when `go.mod` changes:
 the commit then fails; stage the new hash and commit again.
@@ -42,9 +42,9 @@ the commit then fails; stage the new hash and commit again.
 
 ## Code
 
-See [architecture](architecture.md).
+See [architecture](/docs/architecture.md).
 Style: [Google's Go style guide](https://google.github.io/styleguide/go/).
-Comments say why, not what.
+Try to keep comments concise, and say why, not what.
 
 ## Release
 

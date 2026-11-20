@@ -1,6 +1,7 @@
 # Configuration
 
-No config file: the machines, flags, and environment variables.
+sshwarm takes one file with the machine inventory.
+Its command arguments can also be specified through environment variables.
 
 ## Machines
 
@@ -10,7 +11,7 @@ sshwarm takes the first of:
 2. `SSHWARM_HOSTS` or `SSHWARM_FLAKE`
 3. `$XDG_CONFIG_HOME/sshwarm/hosts.toml`, by default `~/.config/sshwarm/hosts.toml`
 
-A hosts file and a flake together are an error.
+Flake and host file are mutually exclusive.
 
 ### Hosts file
 
@@ -44,7 +45,7 @@ does: each node's `hostname`, and its `sshUser` and `sshOpts`, or `deploy`'s. Ne
 | `--refresh <duration>` | `SSHWARM_REFRESH` | `30s` | how often the browser probes |
 | `--read-only` | `SSHWARM_READ_ONLY` | off | no actions, no shells |
 
-A flag beats its variable. `SSHWARM_READ_ONLY` is on unless empty, `0` or `false`.
+flags take precedence over environment variables. `SSHWARM_READ_ONLY` is on unless empty, `0` or `false`.
 
 Commands: `status [--format text|json] [machine...]`, and `probe <machine>`, which
 prints a machine's raw probe output. `sshwarm <command> --help` for more.
