@@ -93,7 +93,7 @@ func (u Unit) Condition() Condition {
 	case "activating", "deactivating", "reloading", "refreshing":
 		return Warning
 	case "active":
-		if u.RecentRestart {
+		if u.RecentRestart && u.Restarts > 2 {
 			return Warning
 		}
 
